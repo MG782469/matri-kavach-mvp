@@ -1,0 +1,131 @@
+/* Matri-Kavach routing engine. Pure functions only: no DOM, no timers, no randomness.
+   Every function takes the clock value (ms) and returns a new referral object. */
+(function (root) {
+  function data() {
+    return typeof module !== 'undefined' && module.exports ? require('./data.js') : root.MK.DATA;
+  }
+
+  function etaMinutes(km, D) {
+    return Math.round((km / D.speedKmh) * 60 * D.detourFactor);
+  }
+
+  // Ready = every checklist item yes in the current shift.
+  // Uncertain = no check-in in the current shift. Never routed as Ready.
+  function facilityStatus(f, D) {
+    if (!f.checkin) return 'uncertain';
+    var ok = D.checklistItems.every(function (item) { return f.checkin.items[item.id] === true; });
+    return ok ? 'ready' : 'not-ready';
+  }
+
+  function candidatesFor(facilities, D, tried) {
+    tried = tried || [];
+    return facilities
+      .filter(function (f) { return f.kind === 'hospital' && tried.indexOf(f.id) === -1; })
+      .filter(function (f) { return facilityStatus(f, D) === 'ready'; })
+      .map(function (f) { return { id: f.id, name: f.short, km: f.km, eta: etaMinutes(f.km, D) }; })
+      .sort(function (a, b) { return a.eta - b.eta || a.km - b.km; });
+  }
+
+  function note(ref, at, text) {
+    return ref.events.concat([{ at: at, text: text }]);
+  }
+
+  function startReferral(typeId, now) {
+    return {
+      id: 'MK-' + String(now).slice(-6), type: typeId, state: 'referred', createdAt: now,
+      proposal: null, tried: [], destination: null, confirmed: null, readyIn: null,
+      timerStart: null, ivrCalled: false, districtAlert: false, arrived: null, outcome: null,
+      closedAt: null, events: [{ at: now, text: 'Referral started by nurse' }]
+    };
+  }
+
+  function propose(ref, facilities, D, now) {
+    var c = candidatesFor(facilities, D, ref.tried);
+    if (c.length) {
+      var first = c[0];
+      return Object.assign({}, ref, { state: 'routed', proposal: first.id, destination: first.id,
+        events: note(ref, now, 'Proposed ' + first.name + ', ' + first.km + ' km, about ' + first.eta + ' min') });
+    }
+    return sendToFallback(ref, now);
+  }
+
+  function changeProposal(ref, facilities, D, now) {
+    if (ref.state !== 'routed') return ref;
+    var c = candidatesFor(facilities, D, ref.tried.concat([ref.proposal]));
+    if (!c.length) return ref;
+    var next = c[0];
+    return Object.assign({}, ref, { proposal: next.id, destination: next.id,
+      events: note(ref, now, 'Nurse changed the proposal to ' + next.name) });
+  }
+
+  function sendTo(ref, now) {
+    if (ref.state !== 'routed') return ref;
+    return Object.assign({}, ref, { state: 'sent', timerStart: now,
+      events: note(ref, now, 'SEND: ambulance 108 told the destination. Hospital asked to confirm') });
+  }
+
+  function sendToFallback(ref, now) {
+    return Object.assign({}, ref, { state: 'fallback', destination: 'mc', proposal: 'mc', districtAlert: true,
+      events: note(ref, now, 'No Ready hospital. Medical college is the destination. District officer alerted') });
+  }
+
+  // After a reroute the ambulance is told the new hospital at once, and the 2-minute timer starts again.
+  function reroute(ref, facilities, D, now) {
+    var p = propose(ref, facilities, D, now);
+    return p.state === 'routed' ? sendTo(p, now) : p;
+  }
+
+  function onHospitalReply(ref, facilityId, reply, facilities, D, now) {
+    if (facilityId !== ref.proposal && facilityId !== ref.destination) return ref;
+    if (reply.kind === 'all-ready' || reply.kind === 'ready-in') {
+      var min = reply.kind === 'ready-in' ? reply.minutes : null;
+      return Object.assign({}, ref, { state: 'confirmed', confirmed: facilityId, readyIn: min,
+        events: note(ref, now, facilityId + ' confirmed ' + (min ? 'ready in ' + min + ' min' : 'ALL READY')) });
+    }
+    if (reply.kind === 'not-available') {
+      var moved = Object.assign({}, ref, { tried: ref.tried.concat([facilityId]),
+        events: note(ref, now, facilityId + ' not available. Rerouting') });
+      return reroute(moved, facilities, D, now);
+    }
+    return ref;
+  }
+
+  function onTimeout(ref, now, D) {
+    if (ref.state !== 'sent') return ref;
+    if (now - ref.timerStart < D.replyWindowSec * 1000) return ref;
+    return Object.assign({}, ref, { state: 'ivr', ivrCalled: true,
+      events: note(ref, now, 'No reply in 2 minutes. IVR call to the duty phone') });
+  }
+
+  function onIVR(ref, answer, facilities, D, now) {
+    if (ref.state !== 'ivr') return ref;
+    if (answer === '1') {
+      return Object.assign({}, ref, { state: 'confirmed', confirmed: ref.proposal,
+        events: note(ref, now, ref.proposal + ' confirmed by IVR') });
+    }
+    var moved = Object.assign({}, ref, { tried: ref.tried.concat([ref.proposal]),
+      events: note(ref, now, 'IVR not answered. Rerouting to the backup') });
+    return reroute(moved, facilities, D, now);
+  }
+
+  function onClose(ref, arrived, outcome, now) {
+    if (ref.state !== 'confirmed' && ref.state !== 'fallback') return ref;
+    return Object.assign({}, ref, { state: 'closed', arrived: arrived, outcome: outcome, closedAt: now,
+      events: note(ref, now, 'Closed: ' + arrived + ', outcome ' + outcome) });
+  }
+
+  function closedLoopRate(refs) {
+    if (!refs.length) return 0;
+    var closed = refs.filter(function (r) { return r.state === 'closed'; }).length;
+    return closed / refs.length;
+  }
+
+  var api = {
+    etaMinutes: etaMinutes, facilityStatus: facilityStatus, candidatesFor: candidatesFor,
+    startReferral: startReferral, propose: propose, changeProposal: changeProposal, sendTo: sendTo,
+    onHospitalReply: onHospitalReply, onTimeout: onTimeout, onIVR: onIVR, onClose: onClose,
+    closedLoopRate: closedLoopRate, sendToFallback: sendToFallback, reroute: reroute
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  root.MK = root.MK || {}; root.MK.engine = api;
+})(typeof window !== 'undefined' ? window : globalThis);

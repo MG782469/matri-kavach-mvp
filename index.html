@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Matri-Kavach MVP</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <img src="src/assets/logo.png" alt="Health-a-thon 2026" class="logo">
+  <div class="titles">
+    <div class="kicker">InnoVerse · Team code I44UEW · Maternal Health</div>
+    <h1>Matri-Kavach MVP</h1>
+    <p class="sub">Route it. Ready it. Close it.</p>
+  </div>
+</header>
+
+<div class="banner" role="note">Synthetic data for demonstration only. No real hospital, patient or family is involved.</div>
+
+<section class="panel" aria-label="Demo controls">
+  <p class="how"><b>How to try it:</b> pick a start below, then tap the buttons in the nurse chat. The hospital phone and the dashboard change as the case moves. Tap Reset to run again.</p>
+  <div class="scn" role="group" aria-label="Scenario">
+    <button class="chip" data-scn="confirms" aria-pressed="true">Hospital confirms</button>
+    <button class="chip" data-scn="silent" aria-pressed="false">No reply, then reroute</button>
+    <button class="chip" data-scn="nobody" aria-pressed="false">No hospital ready</button>
+    <button class="chip" id="reset">Reset</button>
+  </div>
+</section>
+
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" data-v="nurse" aria-selected="true">Nurse</button>
+  <button class="tab" role="tab" data-v="hospital" aria-selected="false">Hospital phone</button>
+  <button class="tab" role="tab" data-v="alerts" aria-selected="false">Alerts</button>
+  <button class="tab" role="tab" data-v="dash" aria-selected="false">District dashboard</button>
+</nav>
+
+<main>
+  <section class="screen" data-v="nurse"><h2>PHC Rampur · Nurse Kavitha</h2><div id="nurse-body"></div></section>
+  <section class="screen" data-v="hospital" hidden><h2>Hospital duty phone</h2><div id="hospital-body"></div></section>
+  <section class="screen" data-v="alerts" hidden><h2>Alerts sent</h2><div id="alerts-body"></div></section>
+  <section class="screen" data-v="dash" hidden><h2>District dashboard</h2><div id="dash-body"></div></section>
+</main>
+
+<footer class="foot">Matri-Kavach is assistive, never diagnostic. Doctors define readiness, humans choose the emergency type.</footer>
+
+<script src="src/data.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/messages.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+/* Colours and type match the Health-a-thon 2026 template: blue 1F3DA9, green 0D8743, grey 5D6A79, dark 232F3E, Arial. */
+:root{
+  --blue:#1F3DA9; --green:#0D8743; --grey:#5D6A79; --dark:#232F3E; --white:#FFFFFF;
+  --panel:#F3F5FA; --line:#D9DEE8; --warn:#A35F00; --warn-bg:#FFF4DE; --bad:#A32020; --bad-bg:#FBE7E7; --ok-bg:#E3F4EA;
+  color-scheme: light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--white);color:var(--dark);font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.45}
+body{padding:0 max(16px, env(safe-area-inset-left, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));max-width:760px;margin:0 auto}
+.top{display:flex;gap:16px;align-items:center;padding:16px 0 8px;border-bottom:1px solid var(--line)}
+.logo{width:150px;max-width:40%;height:auto}
+.titles{min-width:0}
+.kicker{color:var(--grey);font-size:12px;letter-spacing:.04em}
+h1{color:var(--blue);font-size:26px;margin:2px 0 0;text-wrap:balance}
+h2{color:var(--blue);font-size:17px;margin:14px 0 8px}
+.sub{color:var(--grey);margin:2px 0 0}
+.banner{margin:12px 0;background:var(--warn-bg);color:var(--warn);padding:8px 12px;border-radius:6px;font-size:13px;font-weight:bold}
+.panel{background:var(--panel);border-radius:8px;padding:12px}
+.how{margin:0 0 10px;color:var(--grey);font-size:14px}
+.scn{display:flex;flex-wrap:wrap;gap:8px}
+.chip,.btn,.opt{font:inherit;border-radius:20px;border:2px solid var(--blue);background:var(--white);color:var(--blue);padding:8px 14px;cursor:pointer;min-height:44px}
+.chip[aria-pressed="true"]{background:var(--blue);color:var(--white)}
+.btn.primary,.opt:hover{background:var(--blue);color:var(--white)}
+.btn.small{min-height:36px;padding:4px 10px;font-size:13px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0 4px;border-bottom:2px solid var(--line)}
+.tab{font:inherit;background:none;border:none;padding:10px 10px;min-height:44px;color:var(--grey);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}
+.tab[aria-selected="true"]{color:var(--blue);border-bottom-color:var(--blue);font-weight:bold}
+.screen[hidden]{display:none}
+.chat{background:var(--panel);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;min-height:120px;max-height:420px;overflow:auto;margin-bottom:10px}
+.bub{max-width:85%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.bub.in{background:var(--white);border:1px solid var(--line);align-self:flex-start}
+.bub.out{background:var(--blue);color:var(--white);align-self:flex-end}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:8px 0}
+.fld{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--grey);min-width:0}
+.fld input,.fld select{font:inherit;color:var(--dark);padding:8px;border:1px solid var(--line);border-radius:6px;min-height:44px;min-width:0;width:100%}
+.form .btn{grid-column:1/-1;justify-self:start}
+.status{margin:10px 0;padding:10px 12px;background:var(--panel);border-radius:8px;color:var(--dark)}
+.status.ok{background:var(--ok-bg);color:var(--green);font-weight:bold}
+.timer{font-weight:bold;color:var(--blue);font-variant-numeric:tabular-nums}
+.card{background:var(--white);border:1px solid var(--line);border-left:5px solid var(--blue);border-radius:8px;padding:12px;margin:10px 0;min-width:0;overflow-wrap:anywhere}
+.card p{margin:4px 0 0}
+.tile{background:var(--panel);border-radius:8px;padding:12px;margin:10px 0}
+.kpi .big{font-size:40px;font-weight:bold;color:var(--green);margin:2px 0}
+.lbl{color:var(--grey);font-size:12px;letter-spacing:.03em;text-transform:uppercase}
+.checks{list-style:none;padding:0;margin:8px 0 0}
+.checks li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);min-width:0}
+.checks li span{min-width:0}
+.yes{color:var(--green)}
+.no{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--grey);font-weight:bold;font-size:12px}
+.pill{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:bold}
+.pill.ok{background:var(--ok-bg);color:var(--green)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.empty{color:var(--grey)}
+.foot{margin-top:20px;color:var(--grey);font-size:12px;border-top:1px solid var(--line);padding-top:10px}
+@media (max-width:420px){ h1{font-size:22px} .logo{width:110px} }
