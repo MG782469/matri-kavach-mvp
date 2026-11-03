@@ -52,3 +52,7 @@ Deploy on Render: Web Service, build `npm install`, start `npm start`, environme
 ## One-click Render setup
 
 `render.yaml` is a Render Blueprint. On Render: New, Blueprint, pick this repo. It fills in the service name, region, build and start commands, generates `LIVE_KEY`, and asks for `DATABASE_URL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TEST_PHONE`. `TEST_PHONE` is one phone that plays the nurse, hospitals, doctor and family.
+
+## Telegram test channel (free)
+
+Twilio's trial WhatsApp number only sends Twilio's own templates, so for the team test the same alerts can go by Telegram. Make a bot with @BotFather, put its token in `TELEGRAM_BOT_TOKEN` on Render, and redeploy. The live page (`/?key=<LIVE_KEY>`) then shows "Connect phones on Telegram" links. Open one on a phone and tap Start. Hospital messages come with reply buttons (1 All ready, 2 15, 3 Not available). With no Twilio voice number, a second URGENT message stands in for the no-reply call. WhatsApp stays the production channel.

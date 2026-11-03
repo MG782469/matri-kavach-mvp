@@ -165,3 +165,43 @@ test('TEST_PHONE stands in for team roles but not for blood bank, ASHA or distri
   assert.strictEqual(n.baseUrl(), 'https://matri-kavach.onrender.com');
   Object.assign(process.env, keep); delete process.env.TEST_PHONE; delete process.env.RENDER_EXTERNAL_URL;
 });
+
+test('Telegram: join link connects one phone for all roles; INCOMING arrives with buttons; tapping "1 All ready" confirms', async () => {
+  const { createTelegram } = require('../server/telegram.js');
+  const store = new MemoryStore();
+  const calls = [];
+  const api = async (method, params) => { calls.push({ method, params }); return method === 'getMe' ? { username: 'MatriKavachBot' } : {}; };
+  const telegram = createTelegram(store, { token: 'tok', api });
+  await telegram.setup('https://mk.example');
+  assert.ok(calls.some((c) => c.method === 'setWebhook' && c.params.url === 'https://mk.example/telegram/webhook'));
+  let t = 1_000_000;
+  const { app } = createApp({ store, telegram, ctx: {
+    now: () => t, baseUrl: () => 'https://mk.example',
+    send: (live, role, text) => telegram.sendText(live, role, text),
+    call: (live, role, ref, text) => telegram.sendText(live, role, 'URGENT, no reply in 2 minutes. ' + text)
+  } });
+  const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const hook = (text, secret = telegram.secret) => fetch(base + '/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': secret }, body: JSON.stringify({ message: { chat: { id: 555 }, from: { first_name: 'Manas' }, text } }) });
+  const st = await (await fetch(base + '/api/state?sid=live&key=test-key')).json();
+  const all = st.telegram.find((l) => l.role === 'all');
+  assert.match(all.url, /^https:\/\/t\.me\/MatriKavachBot\?start=[a-f0-9]{16}_all$/);
+  assert.strictEqual((await hook('/start x', 'wrong')).status, 403);
+  await hook('/start bad_all');
+  assert.match(calls.at(-1).params.text, /not valid/);
+  await hook('/start ' + all.url.split('start=')[1]);
+  assert.match(calls.at(-1).params.text, /^Connected/);
+  const act = (action, args) => fetch(base + '/api/act', { method: 'POST', headers: { 'content-type': 'application/json', 'x-live-key': 'test-key' }, body: JSON.stringify({ sid: 'live', action, args }) });
+  await act('startReferral', { typeId: 'bleeding' });
+  await act('details', { patient: PATIENT });
+  await act('send', {});
+  const incoming = calls.find((c) => c.method === 'sendMessage' && /^INCOMING/.test(c.params.text));
+  assert.ok(incoming && incoming.params.chat_id === '555' && incoming.params.reply_markup.keyboard);
+  await hook('1 All ready');
+  await new Promise((r) => setTimeout(r, 50));
+  const after = await (await fetch(base + '/api/state?sid=live&key=test-key')).json();
+  assert.strictEqual(after.cur.state, 'confirmed');
+  assert.ok(after.outbox.some((o) => o.label === 'Receiving doctor' && o.status === 'sent' && o.channel === 'telegram'));
+  assert.ok(after.outbox.some((o) => o.label === 'Blood bank' && o.status === 'no-phone'));
+  server.close();
+});

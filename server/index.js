@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const express = require('express');
 const makeStore = require('./store.js');
 const notify = require('./notify.js');
+const { createTelegram } = require('./telegram.js');
 const S = require('./session.js');
 const M = require('../src/messages.js');
 
@@ -13,10 +14,17 @@ const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&':
 
 function createApp(opts = {}) {
   const store = opts.store || makeStore(process.env.DATABASE_URL);
+  const telegram = opts.telegram || createTelegram(store);
+  /* Texts go by Telegram when a bot token is set, otherwise by Twilio WhatsApp.
+     The no-reply call is a Twilio voice call when a Twilio number is set; on Telegram without one, an URGENT second message stands in for it. */
+  const canCall = () => notify.configured() && Boolean(process.env.TWILIO_SMS_FROM);
   const ctx = opts.ctx || {
     now: () => Date.now(),
-    send: notify.sendText,
-    call: notify.placeCall,
+    send: (live, role, text) => (telegram.enabled() ? telegram.sendText(live, role, text) : notify.sendText(live, role, text)),
+    call: async (live, role, refId, text) => {
+      if (live && !canCall() && telegram.enabled()) return telegram.sendText(live, role, 'URGENT, no reply in 2 minutes. ' + text);
+      return Object.assign({ channel: 'voice' }, await notify.placeCall(live, role, refId));
+    },
     baseUrl: notify.baseUrl
   };
   const app = express();
@@ -61,13 +69,15 @@ function createApp(opts = {}) {
     next();
   };
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, db: Boolean(process.env.DATABASE_URL), twilio: notify.configured(), liveEnabled: Boolean(process.env.LIVE_KEY) }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, db: Boolean(process.env.DATABASE_URL), twilio: notify.configured(), telegram: telegram.enabled(), liveEnabled: Boolean(process.env.LIVE_KEY) }));
 
   app.get('/api/state', limited, async (req, res) => {
     const sid = resolveSid(req);
     if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
     const s = await withSession(sid, sid === 'live', async () => undefined);
-    res.json(S.publicView(s, ctx.now()));
+    const view = S.publicView(s, ctx.now());
+    if (sid === 'live') view.telegram = telegram.links();
+    res.json(view);
   });
 
   app.post('/api/act', limited, async (req, res) => {
@@ -88,14 +98,13 @@ function createApp(opts = {}) {
   const twiml = (res, inner) => res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response>' + (inner || '') + '</Response>');
   const guard = (req, res, next) => (notify.validSignature(req) ? next() : res.status(403).send('Bad signature'));
 
-  app.post('/twilio/whatsapp', guard, async (req, res) => {
-    const from = req.body.From || '';
-    const body = String(req.body.Body || '').trim();
+  /* A reply from a phone, by WhatsApp or Telegram. isRole(role) says whether the sender plays that role. */
+  async function inbound(isRole, body) {
     let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
     await withSession('live', true, async (s) => {
       const c = s.cur;
       if (!c) return;
-      if (['sent', 'ivr', 'routed'].includes(c.state) && notify.sameNumber(notify.phoneFor(c.proposal), from)) {
+      if (['sent', 'ivr', 'routed'].includes(c.state) && isRole(c.proposal)) {
         if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready' }); reply = 'Thank you. Recorded: ALL READY.'; }
         else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'not-available' }); reply = 'Recorded: not available. We are rerouting.'; }
         else if (/^2/.test(body)) {
@@ -104,7 +113,7 @@ function createApp(opts = {}) {
           if (!minutes) reply = 'Please send 2 and the minutes, for example: 2 20';
           else { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'ready-in', minutes }); reply = `Recorded: ready in ${minutes} min.`; }
         } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available).';
-      } else if (['confirmed', 'fallback'].includes(c.state) && notify.sameNumber(notify.phoneFor('nurse'), from)) {
+      } else if (['confirmed', 'fallback'].includes(c.state) && isRole('nurse')) {
         if (!c.arrived) {
           const v = { 1: 'Yes', 2: 'No', 3: 'Transferred' }[body[0]];
           if (v) { await S.ACTIONS.arrived(s, ctx, { value: v }); reply = v === 'Yes' ? M.T.outcomeQ : M.T.closed; }
@@ -115,7 +124,27 @@ function createApp(opts = {}) {
         }
       }
     });
+    return reply;
+  }
+
+  app.post('/twilio/whatsapp', guard, async (req, res) => {
+    const from = req.body.From || '';
+    const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), from), String(req.body.Body || '').trim());
     twiml(res, '<Message>' + esc(reply) + '</Message>');
+  });
+
+  app.post('/telegram/webhook', async (req, res) => {
+    if (!telegram.enabled() || req.get('x-telegram-bot-api-secret-token') !== telegram.secret) return res.sendStatus(403);
+    res.sendStatus(200);
+    const m = req.body && req.body.message;
+    if (!m || !m.chat || typeof m.text !== 'string') return;
+    const text = m.text.trim();
+    try {
+      if (/^\/start\b/.test(text)) return void await telegram.reply(m.chat.id, await telegram.join(m.chat.id, m.from && m.from.first_name, text.split(/\s+/)[1]));
+      const roles = await telegram.rolesForChat(m.chat.id);
+      if (!roles.length) return void await telegram.reply(m.chat.id, 'This phone is not connected. Open the Telegram link on the Matri-Kavach live page.');
+      await telegram.reply(m.chat.id, await inbound((role) => roles.includes(role), text));
+    } catch (e) { console.error('telegram webhook failed', e.message); }
   });
 
   app.all('/twilio/voice', guard, async (req, res) => {
@@ -176,12 +205,13 @@ function createApp(opts = {}) {
     } catch (e) { console.error('tick failed', e.message); } finally { ticking = false; }
   }
 
-  return { app, store, runTick };
+  return { app, store, runTick, telegram };
 }
 
 async function main() {
-  const { app, store, runTick } = createApp();
+  const { app, store, runTick, telegram } = createApp();
   await store.init();
+  telegram.setup(notify.baseUrl()).then(() => telegram.enabled() && console.log('Telegram webhook set')).catch((e) => console.error('Telegram setup failed', e.message));
   const timer = setInterval(runTick, 1000);
   const port = Number(process.env.PORT) || 3000;
   const server = app.listen(port, () => console.log(`Matri-Kavach listening on ${port}. db=${Boolean(process.env.DATABASE_URL)} twilio=${notify.configured()} live=${Boolean(process.env.LIVE_KEY)}`));

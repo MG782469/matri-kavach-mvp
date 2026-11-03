@@ -192,8 +192,9 @@ async function tick(s, ctx) {
       setCur(s, r); s.ivrAt = ctx.now();
       const h = fac(s, r.proposal);
       say(s, 'bot', M.fill('silent', { hospital: h.short }));
-      const call = await ctx.call(s.live, r.proposal, r.id);
-      s.outbox.push({ at: ctx.now(), role: r.proposal, label: 'IVR call to ' + h.short, text: M.fill('ivrScript', { eta: eta(h) }), status: call.status, channel: 'voice', error: call.error || null });
+      const script = M.fill('ivrScript', { eta: eta(h) });
+      const call = await ctx.call(s.live, r.proposal, r.id, script);
+      s.outbox.push({ at: ctx.now(), role: r.proposal, label: 'No-reply call to ' + h.short, text: script, status: call.status, channel: call.channel || 'voice', error: call.error || null });
     }
   } else if (c.state === 'ivr' && s.live && s.ivrAt && ctx.now() - s.ivrAt > IVR_WAIT_MS) {
     return ivrAnswer(s, ctx, { answer: 'none' });

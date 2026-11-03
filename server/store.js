@@ -20,7 +20,7 @@ class PgStore {
   async init() {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS sessions (
       id text PRIMARY KEY, data jsonb NOT NULL, state text, updated_at timestamptz NOT NULL DEFAULT now())`);
-    await this.pool.query(`DELETE FROM sessions WHERE id <> 'live' AND updated_at < now() - interval '3 days'`);
+    await this.pool.query(`DELETE FROM sessions WHERE id NOT IN ('live', 'tg-contacts') AND updated_at < now() - interval '3 days'`);
   }
   async get(id) {
     const r = await this.pool.query('SELECT data FROM sessions WHERE id = $1', [id]);
