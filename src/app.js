@@ -348,7 +348,7 @@
   function connect() {
     var p = new URLSearchParams(root.location.search);
     KEY = p.get('key') || null;
-    if (KEY) SID = 'live';
+    if (KEY) { SID = 'live'; var wl = document.getElementById('wa-link'); if (wl) wl.href = '/chat?key=' + encodeURIComponent(KEY); }
     else {
       try { SID = root.localStorage.getItem('mk-sid'); } catch (e) { SID = null; }
       if (!SID || !/^[a-f0-9]{16}$/.test(SID)) { SID = randomHex(16); try { root.localStorage.setItem('mk-sid', SID); } catch (e) {} }

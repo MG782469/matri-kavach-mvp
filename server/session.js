@@ -19,11 +19,11 @@ const seedFacilities = (scenario) => D0.facilities.map((f) => {
 function blank(id, live, scenario) {
   scenario = SCENARIOS.includes(scenario) ? scenario : 'confirms';
   return { id, live: Boolean(live), scenario, facilities: seedFacilities(scenario), refs: [], cur: null,
-    chat: [{ from: 'bot', text: M.T.menu }], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
+    chat: [{ from: 'bot', text: M.T.menu, at: Date.now() }], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
 }
 
 const fac = (s, id) => s.facilities.find((f) => f.id === id);
-const say = (s, from, text) => { s.chat.push({ from, text }); };
+const say = (s, from, text) => { s.chat.push({ from, text, at: Date.now() }); };
 const eta = (f) => E.etaMinutes(f.km, CFG);
 const clock = (ms) => new Date(ms).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }).toLowerCase();
 const clean = (v, n = 60) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, ' ').trim().slice(0, n);
@@ -167,7 +167,7 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
   const r = E.onClose(Object.assign({}, s.cur, { arrived: null }), arrivedV, outcomeV, ctx.now());
   if (r.state !== 'closed') return s;
   setCur(s, r); s.step = 'done';
-  say(s, 'nurse', arrivedV === 'Yes' ? 'Yes, arrived' : arrivedV);
+  if (!(arrivedV === 'Yes' && outcomeV)) say(s, 'nurse', arrivedV === 'Yes' ? 'Yes, arrived' : arrivedV);
   if (outcomeV) say(s, 'nurse', 'Outcome: ' + outcomeV);
   say(s, 'bot', M.T.closed);
   const name = clean((r.patient || D0.mother).name);

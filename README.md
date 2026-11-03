@@ -60,3 +60,7 @@ Twilio's trial WhatsApp number only sends Twilio's own templates, so for the tea
 ## WhatsApp through Meta Cloud API (free)
 
 Twilio's trial blocked the sandbox join, so the live test uses Meta's own WhatsApp Cloud API test number, which is free for up to 5 recipient numbers. Set `WA_TOKEN` and `WA_PHONE_NUMBER_ID` on Render. In the Meta app, set the webhook Callback URL to `/meta/webhook` and the Verify token shown on the live page, and subscribe to the `messages` field. Each test phone sends one message to the test number first: free-form messages only go out inside the 24-hour window that opens. Hospital alerts arrive with three reply buttons.
+
+## WhatsApp-style view
+
+Open `/chat` (for example https://matri-kavach.onrender.com/chat). It shows the same referral on each person's phone as a WhatsApp-style chat with the Matri-Kavach business number: nurse, each hospital duty phone, doctor, blood bank, family, district officer, PHC and ASHA. Buttons, the patient form, the 2-minute timer and the automatic call screen all call the same server actions as the dashboard view, so the two views always show the same case. Add `?key=LIVE_KEY` to drive the live session that sends real WhatsApp messages.

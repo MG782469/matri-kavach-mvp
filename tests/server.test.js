@@ -248,3 +248,21 @@ test('Meta WhatsApp: webhook check, INCOMING has 3 buttons, tapping "1 All ready
   delete process.env.PHONE_DH;
   server.close();
 });
+
+test('WhatsApp-style view is served and closing a case records each nurse answer once', async () => {
+  const h = await boot();
+  try {
+    const page = await fetch(h.base + '/chat');
+    assert.strictEqual(page.status, 200);
+    assert.match(await page.text(), /Matri-Kavach Chat View/);
+    const js = await fetch(h.base + '/src/chat.js');
+    assert.strictEqual(js.status, 200);
+    await toSent(h, SID);
+    await h.act(SID, 'hospitalReply', { kind: 'all-ready' });
+    await h.act(SID, 'arrived', { value: 'Yes' });
+    const done = (await h.act(SID, 'outcome', { value: 'Delivered' })).body;
+    assert.strictEqual(done.cur.state, 'closed');
+    assert.strictEqual(done.chat.filter((m) => m.text === 'Yes, arrived').length, 1);
+    assert.ok(done.chat.every((m) => typeof m.at === 'number'));
+  } finally { h.server.close(); }
+});

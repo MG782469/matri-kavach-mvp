@@ -212,6 +212,7 @@ function createApp(opts = {}) {
 
   /* ---- Static web app ---- */
   app.get('/', (req, res) => res.sendFile(path.join(ROOT, 'index.html')));
+  app.get('/chat', (req, res) => res.sendFile(path.join(ROOT, 'chat.html')));
   app.get('/styles.css', (req, res) => res.sendFile(path.join(ROOT, 'styles.css')));
   app.use('/src', express.static(path.join(ROOT, 'src')));
 

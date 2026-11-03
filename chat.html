@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="theme-color" content="#008069">
+<title>Matri-Kavach Chat View</title>
+<link rel="stylesheet" href="src/chat.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="intro">
+    <div>
+      <div class="kicker">InnoVerse · I44UEW · Health-a-thon 2026</div>
+      <h1>Matri-Kavach on WhatsApp</h1>
+      <p class="sub">Everyone in the referral chats with one Matri-Kavach number. Pick a phone, then tap the buttons in the chat. Same server, rules and timers as the <a href="/" id="classic">dashboard view</a>.</p>
+    </div>
+  </header>
+
+  <div id="note" class="note">Synthetic data for demonstration only. This is a look-alike chat screen, not the WhatsApp app.</div>
+
+  <div class="bar" role="group" aria-label="Demo controls">
+    <button class="ctl" data-scn="confirms" aria-pressed="true">Hospital confirms</button>
+    <button class="ctl" data-scn="nobody" aria-pressed="false">No hospital ready</button>
+    <button class="ctl" id="skip" hidden>Skip 2 minutes</button>
+    <button class="ctl" id="reset">Reset</button>
+  </div>
+
+  <nav class="phones" aria-label="Whose phone" id="phones"></nav>
+
+  <div class="stage">
+    <div class="device" id="device">
+      <div class="wa-top">
+        <button class="ic back" aria-label="Back" tabindex="-1"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 4l1.4 1.4L7.8 11H20v2H7.8l5.6 5.6L12 20l-8-8z"/></svg></button>
+        <div class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="#fff" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3zm-1 14-4-4 1.4-1.4L11 13.2l4.6-4.6L17 10l-6 6z"/></svg></div>
+        <div class="who"><div class="name">Matri-Kavach <span class="vbadge" aria-label="Business account">✓</span></div><div class="status" id="hdr-sub">Business account</div></div>
+        <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M15 8v8H5V8h10m1-2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4V7a1 1 0 0 0-1-1z"/></svg></span>
+        <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg></span>
+      </div>
+      <div class="owner" id="owner"></div>
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <div class="wa-input" aria-hidden="true">
+        <div class="field"><span>Message</span></div>
+        <div class="mic"><svg viewBox="0 0 24 24" width="22" height="22"><path fill="#fff" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z"/></svg></div>
+      </div>
+
+      <div class="sheet-bg" id="sheet-bg" hidden></div>
+      <div class="sheet" id="sheet" hidden role="dialog" aria-modal="true"></div>
+
+      <div class="call" id="call" hidden role="dialog" aria-label="Incoming voice call">
+        <div class="call-top"><div class="enc">🔒 End-to-end encrypted</div><div class="call-av"><svg viewBox="0 0 24 24" width="54" height="54"><path fill="#fff" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3zm-1 14-4-4 1.4-1.4L11 13.2l4.6-4.6L17 10l-6 6z"/></svg></div>
+          <div class="call-name">Matri-Kavach</div><div class="call-sub">Incoming voice call</div></div>
+        <div class="call-script" id="call-script"></div>
+        <div class="call-btns">
+          <button class="cbtn decline" data-act="ivr" data-v="none"><span><svg viewBox="0 0 24 24" width="28" height="28"><path fill="#fff" d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .4-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85a1 1 0 0 1-1.41-.02L.29 13.08a1 1 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67a1 1 0 0 1 0 1.41l-2.48 2.48a1 1 0 0 1-1.41.02 11.3 11.3 0 0 0-2.67-1.85 1 1 0 0 1-.56-.9v-3.1A15 15 0 0 0 12 9z"/></svg></span>No answer</button>
+          <button class="cbtn accept" data-act="ivr" data-v="1"><span>1</span>Press 1, all ready</button>
+        </div>
+      </div>
+    </div>
+
+    <aside class="side" id="side"></aside>
+  </div>
+
+  <footer class="foot">Assistive, never diagnostic. Doctors define readiness, humans choose the emergency type. Real WhatsApp messages go only to the team's own test phones.</footer>
+</div>
+
+<script src="src/data.js"></script>
+<script src="src/engine.js"></script>
+<script src="src/messages.js"></script>
+<script src="src/chat.js"></script>
+</body>
+</html>
