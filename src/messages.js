@@ -2,6 +2,9 @@
 (function (root) {
   var T = {
     menu: 'Matri-Kavach. Tap: New emergency referral.',
+    hello: 'Namaste! This is Matri-Kavach, emergency referral help for PHC Rampur. Tap Choose emergency to start a referral.',
+    sayHi: 'Type Hi to start a new emergency referral.',
+    busy: 'A referral is in progress. Please use the buttons above.',
     pickType: 'Tap one emergency type:',
     typeNotSigned: 'The checklist for this type is not signed yet. For this demo, please use heavy bleeding after delivery.',
     details: 'Patient details. You can send these now or later.',

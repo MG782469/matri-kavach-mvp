@@ -266,3 +266,17 @@ test('WhatsApp-style view is served and closing a case records each nurse answer
     assert.ok(done.chat.every((m) => typeof m.at === 'number'));
   } finally { h.server.close(); }
 });
+
+test('nurse chat starts empty and Hi opens the menu', async () => {
+  const h = await boot();
+  try {
+    const sid = '0123456789abcdef';
+    let r = await fetch(h.base + '/api/state?sid=' + sid).then((x) => x.json());
+    assert.strictEqual(r.chat.length, 0);
+    r = (await h.act(sid, 'nurseText', { text: 'hello' })).body;
+    assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot']);
+    assert.match(r.chat[1].text, /Namaste/);
+    r = (await h.act(sid, 'nurseText', { text: 'what now' })).body;
+    assert.match(r.chat[3].text, /Type Hi/);
+  } finally { h.server.close(); }
+});

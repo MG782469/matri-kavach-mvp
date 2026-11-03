@@ -6,16 +6,16 @@
   var ECHO = {}; // replies tapped on a hospital phone in this browser, shown as sent messages
 
   var PHONES = [
-    { id: 'nurse', label: 'Nurse', owner: 'Phone of Nurse Kavitha, PHC Rampur (refers the mother)' },
-    { id: 'dh', label: 'DH Devgarh', owner: 'Labour-room duty phone, District Hospital Devgarh' },
-    { id: 'sdh', label: 'SDH Kheri', owner: 'Labour-room duty phone, Sub-district Hospital Kheri' },
+    { id: 'nurse', label: 'Nurse', owner: 'Nurse Kavitha, PHC Rampur' },
+    { id: 'dh', label: 'DH Devgarh', owner: 'Labour room, DH Devgarh' },
+    { id: 'sdh', label: 'SDH Kheri', owner: 'Labour room, SDH Kheri' },
     { id: 'chc', label: 'CHC Sonpur', owner: 'Duty phone, CHC Sonpur' },
-    { id: 'mc', label: 'GMC Rajnagar', owner: 'Obstetrics emergency desk, Govt Medical College Rajnagar' },
-    { id: 'doctor', label: 'Doctor', owner: 'Phone of the receiving doctor' },
-    { id: 'bloodbank', label: 'Blood bank', owner: 'Blood bank phone at the receiving hospital' },
-    { id: 'family', label: 'Family', owner: 'Phone of the mother’s family' },
-    { id: 'district', label: 'District officer', owner: 'Phone of the district maternal health officer' },
-    { id: 'asha', label: 'PHC and ASHA', owner: 'Phone of the PHC and the mother’s ASHA' }
+    { id: 'mc', label: 'GMC Rajnagar', owner: 'Emergency desk, GMC Rajnagar' },
+    { id: 'doctor', label: 'Doctor', owner: 'Receiving doctor' },
+    { id: 'bloodbank', label: 'Blood bank', owner: 'Blood bank' },
+    { id: 'family', label: 'Family', owner: 'Mother’s family' },
+    { id: 'district', label: 'District officer', owner: 'District MH officer' },
+    { id: 'asha', label: 'PHC and ASHA', owner: 'PHC and ASHA Sunita' }
   ];
 
   function $(id) { return document.getElementById(id); }
@@ -70,7 +70,8 @@
     var near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     var list = msgsFor(VIEW), r = cur(), html = '<div class="day">Today</div>';
     html += '<div class="sysmsg">🔒 Messages here are the same texts Matri-Kavach sends on WhatsApp. Synthetic demo data.</div>';
-    if (!list.length) html += '<div class="empty">' + emptyText(VIEW) + '</div>';
+    if (!list.length && VIEW === 'nurse') html += '<div class="sysmsg">Say <b>Hi</b> to Matri-Kavach to start. Type it below or tap the Hi chip.</div>';
+    else if (!list.length) html += '<div class="empty">' + emptyText(VIEW) + '</div>';
     var lastIn = -1; list.forEach(function (m, i) { if (m.dir === 'in') lastIn = i; });
     var lastIncoming = -1; list.forEach(function (m, i) { if (m.incoming) lastIncoming = i; });
     list.forEach(function (m, i) {
@@ -90,7 +91,7 @@
       var nb = nurseButtons();
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
     }
-    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call.</div>';
+    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call. <button data-act="skip">Skip 2 min (demo)</button></div>';
     if (r && r.state === 'ivr' && VIEW === 'nurse') html += '<div class="sysmsg">📞 Calling ' + esc(fac(r.proposal).short) + ' duty phone now.</div>';
     el.innerHTML = html;
     if (near || BUSY) el.scrollTop = el.scrollHeight;
@@ -111,12 +112,16 @@
       return '<button class="ph" role="tab" data-phone="' + p.id + '" aria-selected="' + (p.id === VIEW) + '">' + esc(p.label) + (unread ? '<span class="badge">' + unread + '</span>' : '') + '</button>';
     }).join('');
     var p = PHONES.filter(function (x) { return x.id === VIEW; })[0];
-    $('owner').textContent = p.owner;
+    var others = PHONES.reduce(function (n, x) { return x.id === VIEW ? n : n + Math.max(0, countIn(x.id) - (SEEN[x.id] || 0)); }, 0);
+    $('owner').innerHTML = '\ud83d\udcf1 Phone of <b>' + esc(p.owner) + '</b> <span class="sw">Switch phone \u25be</span>' + (others ? '<span class="badge">' + others + '</span>' : '');
+    var nurseNew = VIEW === 'nurse' && (!ST.chat.length || ST.step === 'done');
+    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="Hello">Hello</button><button data-act="say" data-v="Namaste">Namaste</button>' : '';
   }
 
   /* ---------- side panel: what to tap next, the case, readiness ---------- */
   function next() {
     var r = cur(), step = ST.step;
+    if (!r && !ST.chat.length) return ['nurse', 'On the Nurse phone, type Hi (or tap the Hi chip). Matri-Kavach answers with the menu.'];
     if (!r || step === 'start') return ['nurse', 'On the Nurse phone, tap Choose emergency and pick heavy bleeding after delivery.'];
     if (step === 'details') return ['nurse', 'Tap Fill patient details. The values are filled in for you, just tap Send.'];
     if (step === 'proposed') return ['nurse', 'Matri-Kavach picked the nearest hospital that said ready this shift. Tap SEND, or CHANGE to pick the next one.'];
@@ -174,6 +179,21 @@
   /* ---------- bottom sheets: list message and patient form (like WhatsApp Flows) ---------- */
   function openSheet(html) { $('sheet').innerHTML = '<div class="grab"></div>' + html; $('sheet').hidden = false; $('sheet-bg').hidden = false; }
   function closeSheet() { $('sheet').hidden = true; $('sheet-bg').hidden = true; }
+  function phonesSheet() {
+    openSheet('<h3>Switch phone</h3><p class="sub2">Each person chats with the same Matri-Kavach number.</p>' + PHONES.map(function (p) {
+      var unread = p.id === VIEW ? 0 : Math.max(0, countIn(p.id) - (SEEN[p.id] || 0));
+      return '<button class="opt' + (p.id === VIEW ? ' cur' : '') + '" data-phone="' + p.id + '"><span>' + esc(p.label) + '<small>' + esc(p.owner) + '</small></span>' + (unread ? '<span class="badge">' + unread + '</span>' : '') + '</button>';
+    }).join(''));
+  }
+  function menuSheet() {
+    var r = cur();
+    openSheet('<h3>Demo menu</h3>' +
+      (r && r.state === 'sent' ? '<button class="opt" data-act="skip"><span>Skip 2 minutes<small>See what happens when the hospital stays silent</small></span></button>' : '') +
+      '<button class="opt" data-scn="confirms"><span>New case: hospital confirms</span></button>' +
+      '<button class="opt" data-scn="nobody"><span>New case: no hospital ready<small>Nobody passes the checklist tonight</small></span></button>' +
+      '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
+      '<a class="opt" href="' + esc($('classic').getAttribute('href')) + '"><span>Open the dashboard view</span></a>');
+  }
   function typeSheet() {
     openSheet('<h3>Choose emergency</h3>' + D.emergencyTypes.map(function (t, i) {
       return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? '' : '<small>Checklist not signed yet</small>') + '</span><span class="radio"></span></button>';
@@ -213,7 +233,7 @@
   function note(text, live) { var el = $('note'); el.textContent = text; el.className = 'note' + (live ? ' live' : ''); }
   function echo(role, text) { var r = cur(); (ECHO[role] = ECHO[role] || []).push({ text: text, at: now(), ref: r && r.id }); }
 
-  function show(phone) { VIEW = phone; SEEN[VIEW] = countIn(VIEW); closeSheet(); LAST = ''; render(); var el = $('msgs'); el.scrollTop = el.scrollHeight; try { root.localStorage.setItem('mk-chat-view', phone); } catch (e) {} }
+  function show(phone) { if (root.scrollY > 0) root.scrollTo(0, 0); VIEW = phone; SEEN[VIEW] = countIn(VIEW); closeSheet(); LAST = ''; render(); var el = $('msgs'); el.scrollTop = el.scrollHeight; try { root.localStorage.setItem('mk-chat-view', phone); } catch (e) {} }
 
   function bind() {
     document.addEventListener('click', function (e) {
@@ -221,10 +241,15 @@
       var sc = e.target.closest('[data-scn]'); if (sc) { ECHO = {}; act('reset', { scenario: sc.dataset.scn }).then(function () { show('nurse'); }); return; }
       if (e.target.closest('#reset')) { ECHO = {}; act('reset', { scenario: ST ? ST.scenario : 'confirms' }).then(function () { show('nurse'); }); return; }
       if (e.target.closest('#skip')) { act('skip', {}); return; }
+      if (e.target.closest('[data-act="reset"]')) { closeSheet(); ECHO = {}; act('reset', { scenario: ST ? ST.scenario : 'confirms' }).then(function () { show('nurse'); }); return; }
       if (e.target.id === 'sheet-bg') { closeSheet(); return; }
       var b = e.target.closest('[data-act]'); if (!b) return;
       var a = b.dataset.act, v = b.dataset.v;
-      if (a === 'pick-type') typeSheet();
+      if (a === 'phones') phonesSheet();
+      else if (a === 'menu') menuSheet();
+      else if (a === 'skip') { closeSheet(); act('skip', {}); }
+      else if (a === 'say') typed(v);
+      else if (a === 'pick-type') typeSheet();
       else if (a === 'open-details') detailsSheet();
       else if (a === 'type') document.querySelectorAll('.sheet .opt').forEach(function (o) { o.setAttribute('aria-checked', String(o === b)); });
       else if (a === 'type-send') { var sel = document.querySelector('.sheet .opt[aria-checked="true"]'); closeSheet(); act('startReferral', { typeId: sel ? sel.dataset.v : 'bleeding' }); }
@@ -243,6 +268,28 @@
     setInterval(countdown, 500);
   }
 
+  /* What the person types in the message box. */
+  function typed(text) {
+    text = String(text || '').trim(); if (!text) return;
+    if (VIEW === 'nurse') { act('nurseText', { text: text }); return; }
+    if (isHospital(VIEW) && hospitalCanReply(VIEW)) {
+      var m = text.match(/^\s*([123])\D*(\d+)?/);
+      if (m) {
+        echo(VIEW, text);
+        if (m[1] === '1') act('hospitalReply', { kind: 'all-ready' });
+        else if (m[1] === '3') act('hospitalReply', { kind: 'not-available' });
+        else act('hospitalReply', { kind: 'ready-in', minutes: Number(m[2]) || 15 });
+        return;
+      }
+    }
+    echo(VIEW, text); LAST = ''; render();
+  }
+  function bindComposer() {
+    var f = $('composer'), t = $('text');
+    t.addEventListener('input', function () { f.classList.toggle('has-text', !!t.value.trim()); });
+    f.addEventListener('submit', function (e) { e.preventDefault(); var v = t.value; t.value = ''; f.classList.remove('has-text'); typed(v); });
+  }
+
   function randomHex(n) {
     var a = new Uint8Array(n / 2); root.crypto.getRandomValues(a);
     return Array.prototype.map.call(a, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
@@ -258,7 +305,7 @@
     }
     try { var v = root.localStorage.getItem('mk-chat-view'); if (v && PHONES.some(function (p) { return p.id === v; })) VIEW = v; } catch (e) {}
     if (q.get('phone') && PHONES.some(function (p) { return p.id === q.get('phone'); })) VIEW = q.get('phone');
-    bind();
+    bind(); bindComposer();
     fetch('/api/state?sid=' + SID, { headers: headers() })
       .then(function (r) { if (!r.ok) throw new Error('no server'); return r.json(); })
       .then(function (st) {

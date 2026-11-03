@@ -19,7 +19,7 @@ const seedFacilities = (scenario) => D0.facilities.map((f) => {
 function blank(id, live, scenario) {
   scenario = SCENARIOS.includes(scenario) ? scenario : 'confirms';
   return { id, live: Boolean(live), scenario, facilities: seedFacilities(scenario), refs: [], cur: null,
-    chat: [{ from: 'bot', text: M.T.menu, at: Date.now() }], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
+    chat: [], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
 }
 
 const fac = (s, id) => s.facilities.find((f) => f.id === id);
@@ -205,7 +205,23 @@ async function tick(s, ctx) {
   return s;
 }
 
-const ACTIONS = { startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, outcome, reset };
+const GREETING = /^(hi+|hello+|hey+|hii+|namaste|namaskar|start|menu)\b/i;
+
+/* The nurse types in the chat. "Hi" (or hello, namaste) opens the menu, like any WhatsApp business bot. */
+async function nurseText(s, ctx, a) {
+  const text = clean(a.text, 120);
+  if (!text) return s;
+  if (GREETING.test(text) && (s.step === 'done' || !s.cur)) {
+    if (s.step === 'done') await reset(s, ctx, {});
+    say(s, 'nurse', text); say(s, 'bot', M.T.hello);
+    return s;
+  }
+  say(s, 'nurse', text);
+  say(s, 'bot', s.cur ? M.T.busy : M.T.sayHi);
+  return s;
+}
+
+const ACTIONS = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, outcome, reset };
 
 function publicView(s, now) {
   return { id: s.id, live: s.live, scenario: s.scenario, facilities: s.facilities, refs: s.refs, cur: s.cur, chat: s.chat,

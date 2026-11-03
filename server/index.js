@@ -107,6 +107,9 @@ function createApp(opts = {}) {
     let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
     await withSession('live', true, async (s) => {
       const c = s.cur;
+      if (isRole('nurse') && /^(hi+|hello+|hey+|namaste|namaskar)\b/i.test(body) && (!c || s.step === 'done')) {
+        await S.ACTIONS.nurseText(s, ctx, { text: body }); reply = M.T.hello; return;
+      }
       if (!c) return;
       if (['sent', 'ivr', 'routed'].includes(c.state) && isRole(c.proposal)) {
         if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready' }); reply = 'Thank you. Recorded: ALL READY.'; }
