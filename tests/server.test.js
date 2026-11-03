@@ -205,3 +205,46 @@ test('Telegram: join link connects one phone for all roles; INCOMING arrives wit
   assert.ok(after.outbox.some((o) => o.label === 'Blood bank' && o.status === 'no-phone'));
   server.close();
 });
+
+test('Meta WhatsApp: webhook check, INCOMING has 3 buttons, tapping "1 All ready" confirms, expired-window error is explained', async () => {
+  const { createMeta } = require('../server/meta.js');
+  const sent = [];
+  let failNext = false;
+  const api = async (body) => {
+    if (failNext) { failNext = false; throw new Error('WhatsApp 131047: Re-engagement message (the phone must send a message to the test number first: 24-hour window)'); }
+    sent.push(body); return { messages: [{ id: 'wamid.x' }] };
+  };
+  const meta = createMeta({ WA_TOKEN: 't', WA_PHONE_NUMBER_ID: '123', WA_APP_SECRET: '', api });
+  const store = new MemoryStore();
+  const { createTelegram } = require('../server/telegram.js');
+  process.env.PHONE_DH = '+919700123513'; process.env.PHONE_NURSE = '+919700123513';
+  const { app } = createApp({ store, meta, telegram: createTelegram(store, { token: '' }) });
+  const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const st0 = await (await fetch(base + '/api/state?sid=live&key=test-key')).json();
+  const vt = st0.metaVerifyToken;
+  assert.match(vt, /^[a-f0-9]{20}$/);
+  assert.strictEqual(await (await fetch(base + `/meta/webhook?hub.mode=subscribe&hub.verify_token=${vt}&hub.challenge=42`)).text(), '42');
+  assert.strictEqual((await fetch(base + '/meta/webhook?hub.mode=subscribe&hub.verify_token=no&hub.challenge=42')).status, 403);
+  const act = (action, args) => fetch(base + '/api/act', { method: 'POST', headers: { 'content-type': 'application/json', 'x-live-key': 'test-key' }, body: JSON.stringify({ sid: 'live', action, args }) });
+  await act('startReferral', { typeId: 'bleeding' });
+  await act('details', { patient: PATIENT });
+  await act('send', {});
+  const inc = sent.find((b) => b.type === 'interactive');
+  assert.ok(inc && inc.to === '919700123513' && inc.interactive.action.buttons.length === 3);
+  assert.ok(inc.interactive.action.buttons.every((b) => b.reply.title.length <= 20));
+  const tap = { entry: [{ changes: [{ value: { messages: [{ from: '919700123513', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: '1', title: '1 All ready' } } }] } }] }] };
+  await fetch(base + '/meta/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(tap) });
+  await new Promise((r) => setTimeout(r, 50));
+  let st = await (await fetch(base + '/api/state?sid=live&key=test-key')).json();
+  assert.strictEqual(st.cur.state, 'confirmed');
+  assert.ok(sent.some((b) => b.type === 'text' && /ALL READY/.test(b.text.body)));
+  await act('reset', {});
+  await act('startReferral', { typeId: 'bleeding' });
+  await act('details', { patient: PATIENT });
+  failNext = true;
+  st = await (await act('send', {})).json();
+  assert.ok(st.outbox.some((o) => o.status === 'failed' && /24-hour window/.test(o.error)));
+  delete process.env.PHONE_DH;
+  server.close();
+});

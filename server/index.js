@@ -6,6 +6,7 @@ const express = require('express');
 const makeStore = require('./store.js');
 const notify = require('./notify.js');
 const { createTelegram } = require('./telegram.js');
+const { createMeta } = require('./meta.js');
 const S = require('./session.js');
 const M = require('../src/messages.js');
 
@@ -15,13 +16,16 @@ const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&':
 function createApp(opts = {}) {
   const store = opts.store || makeStore(process.env.DATABASE_URL);
   const telegram = opts.telegram || createTelegram(store);
+  const meta = opts.meta || createMeta();
   /* Texts go by Telegram when a bot token is set, otherwise by Twilio WhatsApp.
      The no-reply call is a Twilio voice call when a Twilio number is set; on Telegram without one, an URGENT second message stands in for it. */
   const canCall = () => notify.configured() && Boolean(process.env.TWILIO_SMS_FROM);
   const ctx = opts.ctx || {
     now: () => Date.now(),
-    send: (live, role, text) => (telegram.enabled() ? telegram.sendText(live, role, text) : notify.sendText(live, role, text)),
+    send: (live, role, text) => (meta.enabled() ? meta.sendText(live, notify.phoneFor(role), text)
+      : telegram.enabled() ? telegram.sendText(live, role, text) : notify.sendText(live, role, text)),
     call: async (live, role, refId, text) => {
+      if (live && !canCall() && meta.enabled()) return meta.sendText(live, notify.phoneFor(role), 'URGENT, no reply in 2 minutes. ' + text);
       if (live && !canCall() && telegram.enabled()) return telegram.sendText(live, role, 'URGENT, no reply in 2 minutes. ' + text);
       return Object.assign({ channel: 'voice' }, await notify.placeCall(live, role, refId));
     },
@@ -30,7 +34,7 @@ function createApp(opts = {}) {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '10kb' }));
+  app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
   app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 
   /* One request at a time per session, so a webhook and a tap cannot overwrite each other. */
@@ -69,14 +73,14 @@ function createApp(opts = {}) {
     next();
   };
 
-  app.get('/api/health', (req, res) => res.json({ ok: true, db: Boolean(process.env.DATABASE_URL), twilio: notify.configured(), telegram: telegram.enabled(), liveEnabled: Boolean(process.env.LIVE_KEY) }));
+  app.get('/api/health', (req, res) => res.json({ ok: true, db: Boolean(process.env.DATABASE_URL), twilio: notify.configured(), whatsappMeta: meta.enabled(), telegram: telegram.enabled(), liveEnabled: Boolean(process.env.LIVE_KEY) }));
 
   app.get('/api/state', limited, async (req, res) => {
     const sid = resolveSid(req);
     if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
     const s = await withSession(sid, sid === 'live', async () => undefined);
     const view = S.publicView(s, ctx.now());
-    if (sid === 'live') view.telegram = telegram.links();
+    if (sid === 'live') { view.telegram = meta.enabled() ? null : telegram.links(); view.metaVerifyToken = meta.verifyToken(); }
     res.json(view);
   });
 
@@ -131,6 +135,23 @@ function createApp(opts = {}) {
     const from = req.body.From || '';
     const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), from), String(req.body.Body || '').trim());
     twiml(res, '<Message>' + esc(reply) + '</Message>');
+  });
+
+  /* Meta WhatsApp Cloud API webhook: GET is the one-time check when you add the URL, POST carries messages. */
+  app.get('/meta/webhook', (req, res) => {
+    const vt = meta.verifyToken();
+    if (req.query['hub.mode'] === 'subscribe' && vt && req.query['hub.verify_token'] === vt) return res.type('text/plain').send(String(req.query['hub.challenge'] || ''));
+    res.sendStatus(403);
+  });
+  app.post('/meta/webhook', async (req, res) => {
+    if (!meta.validSignature(req)) return res.sendStatus(403);
+    res.sendStatus(200);
+    for (const m of meta.incoming(req.body)) {
+      try {
+        const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), m.from), m.text);
+        await meta.sendTo(m.from, reply);
+      } catch (e) { console.error('meta webhook failed', e.message); }
+    }
   });
 
   app.post('/telegram/webhook', async (req, res) => {

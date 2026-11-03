@@ -306,6 +306,7 @@
     D.replyWindowSec = st.replyWindowSec;
     S.facilities = st.facilities; S.refs = st.refs; S.cur = st.cur; S.chat = st.chat; S.step = st.step; S.scenario = st.scenario; S.outbox = st.outbox || [];
     showTelegram(st.telegram);
+    showMeta(st.metaVerifyToken);
     var sig = JSON.stringify([st.facilities, st.refs, st.cur, st.chat, st.step, st.scenario, st.outbox]);
     if (sig !== LAST) { LAST = sig; render(); }
   }
@@ -318,6 +319,15 @@
     el.dataset.done = '1'; el.hidden = false;
     el.innerHTML = '<div class="lbl">Connect phones on Telegram</div><p>Open a link on the phone, then tap Start. One phone can play every role.</p><div class="opts">' +
       links.map(function (l) { return '<a class="btn' + (l.role === 'all' ? ' primary' : '') + '" href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a>'; }).join('') + '</div>';
+  }
+
+  // Live session only: the two values Meta asks for when you add the WhatsApp webhook.
+  function showMeta(token) {
+    var el = document.getElementById('meta-setup'); if (!el) return;
+    if (!token) { el.hidden = true; return; }
+    if (el.dataset.done) return;
+    el.dataset.done = '1'; el.hidden = false;
+    el.innerHTML = '<div class="lbl">WhatsApp webhook (for Meta setup)</div><p>Callback URL:<br><code>' + esc(root.location.origin + '/meta/webhook') + '</code></p><p>Verify token:<br><code>' + esc(token) + '</code></p>';
   }
 
   function act(action, args) {

@@ -56,3 +56,7 @@ Deploy on Render: Web Service, build `npm install`, start `npm start`, environme
 ## Telegram test channel (free)
 
 Twilio's trial WhatsApp number only sends Twilio's own templates, so for the team test the same alerts can go by Telegram. Make a bot with @BotFather, put its token in `TELEGRAM_BOT_TOKEN` on Render, and redeploy. The live page (`/?key=<LIVE_KEY>`) then shows "Connect phones on Telegram" links. Open one on a phone and tap Start. Hospital messages come with reply buttons (1 All ready, 2 15, 3 Not available). With no Twilio voice number, a second URGENT message stands in for the no-reply call. WhatsApp stays the production channel.
+
+## WhatsApp through Meta Cloud API (free)
+
+Twilio's trial blocked the sandbox join, so the live test uses Meta's own WhatsApp Cloud API test number, which is free for up to 5 recipient numbers. Set `WA_TOKEN` and `WA_PHONE_NUMBER_ID` on Render. In the Meta app, set the webhook Callback URL to `/meta/webhook` and the Verify token shown on the live page, and subscribe to the `messages` field. Each test phone sends one message to the test number first: free-form messages only go out inside the 24-hour window that opens. Hospital alerts arrive with three reply buttons.
