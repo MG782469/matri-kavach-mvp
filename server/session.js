@@ -177,8 +177,11 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
 
 async function reset(s, ctx, a) {
   const fresh = blank(s.id, s.live, a.scenario || s.scenario);
+  // Summary links already sent to a doctor keep working until they expire, even after Reset.
+  const links = {};
+  Object.keys(s.links || {}).forEach((k) => { if (s.links[k].expires > ctx.now()) links[k] = s.links[k]; });
   Object.keys(s).forEach((k) => delete s[k]);
-  Object.assign(s, fresh);
+  Object.assign(s, fresh, { links });
   return s;
 }
 
