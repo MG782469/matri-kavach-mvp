@@ -1,10 +1,11 @@
 /* Screens, buttons and the demo clock. All routing decisions come from engine.js. */
 (function (root) {
   var MK = root.MK, D = MK.DATA, E = MK.engine, M = MK.messages;
-  var S = { facilities: [], refs: [], cur: null, chat: [], step: 'start', form: null, scenario: 'confirms', auto: null, view: 'nurse', pendingType: null };
+  var LIVE = false, SID = null, KEY = null, OFFSET = 0, BUSY = false, LAST = '';
+  var S = { outbox: [], facilities: [], refs: [], cur: null, chat: [], step: 'start', form: null, scenario: 'confirms', auto: null, view: 'nurse', pendingType: null };
   var SILENT = { silent: ['dh'], confirms: [], nobody: [] };
 
-  function now() { return Date.now(); }
+  function now() { return Date.now() + OFFSET; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fac(id) { return S.facilities.filter(function (f) { return f.id === id; })[0]; }
   function setCur(r) { S.cur = r; if (!r) return; S.refs = S.refs.some(function (x) { return x.id === r.id; }) ? S.refs.map(function (x) { return x.id === r.id ? r : x; }) : S.refs.concat([r]); }
@@ -20,6 +21,7 @@
   }
 
   function reset(scenario) {
+    if (LIVE) return act('reset', { scenario: scenario || S.scenario });
     applyScenario(scenario || S.scenario);
     S.refs = []; S.cur = null; S.chat = []; S.step = 'start'; S.form = null; S.auto = null; S.pendingType = null;
     say('bot', M.T.menu);
@@ -27,6 +29,7 @@
   }
 
   function startReferral(typeId) {
+    if (LIVE) return act('startReferral', { typeId: typeId });
     var t = D.emergencyTypes.filter(function (x) { return x.id === typeId; })[0];
     if (!t.signed) { say('bot', M.T.typeNotSigned); render(); return; }
     setCur(E.startReferral(typeId, now()));
@@ -37,6 +40,7 @@
   function submitDetails() {
     var v = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
     S.form = { name: v('f-name'), age: v('f-age'), blood: v('f-blood'), contact: v('f-contact'), time: v('f-time'), mode: v('f-mode'), oxy: v('f-oxy'), miso: v('f-miso'), iv: v('f-iv') };
+    if (LIVE) return act('details', { patient: S.form });
     S.cur = Object.assign({}, S.cur, { patient: S.form });
     say('nurse', 'Details sent: ' + S.form.name + ', ' + S.form.age + ', ' + S.form.blood + ', delivered ' + S.form.time);
     var r = E.propose(S.cur, S.facilities, D, now());
@@ -47,6 +51,7 @@
   }
 
   function changeProposal() {
+    if (LIVE) return act('change', {});
     var r = E.changeProposal(S.cur, S.facilities, D, now());
     setCur(r); var h = fac(r.proposal);
     say('nurse', 'CHANGE'); say('bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: E.etaMinutes(h.km, D) }));
@@ -54,6 +59,7 @@
   }
 
   function send() {
+    if (LIVE) return act('send', {});
     var r = E.sendTo(S.cur, now());
     setCur(r); S.step = 'waiting'; say('nurse', 'SEND'); say('bot', M.T.sent);
     autoReplyFor(r.proposal);
@@ -67,6 +73,7 @@
   }
 
   function hospitalReply(kind, minutes, hospitalId) {
+    if (LIVE) return act('hospitalReply', { kind: kind, minutes: minutes });
     if (!S.cur || S.cur.state !== 'sent' && S.cur.state !== 'ivr' && S.cur.state !== 'routed') return;
     if (hospitalId && S.cur.proposal !== hospitalId) return;
     S.auto = null;
@@ -91,7 +98,17 @@
     }
   }
 
+  function countdown() {
+    var t = now();
+    if (S.cur && S.cur.state === 'sent') {
+      var left = Math.max(0, Math.ceil((S.cur.timerStart + D.replyWindowSec * 1000 - t) / 1000));
+      var txt = '0' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+      document.querySelectorAll('[data-cd]').forEach(function (c) { c.textContent = txt; });
+    }
+  }
+
   function tick() {
+    if (LIVE) { countdown(); return; }
     if (!S.cur) return;
     var t = now();
     if (S.cur.state === 'sent') {
@@ -112,6 +129,7 @@
   }
 
   function ivrAnswer(ans) {
+    if (LIVE) return act('ivrAnswer', { answer: ans });
     if (!S.cur || S.cur.state !== 'ivr') return;
     S.auto = null;
     var prev = S.cur.proposal;
@@ -124,6 +142,7 @@
   }
 
   function skipTwoMinutes() {
+    if (LIVE) return act('skip', {});
     if (!S.cur || S.cur.state !== 'sent') return;
     setCur(Object.assign({}, S.cur, { timerStart: S.cur.timerStart - D.replyWindowSec * 1000 }));
   }
@@ -208,7 +227,7 @@
   function renderAlerts() {
     var el = document.getElementById('alerts-body');
     var r = S.cur;
-    if (!r || (r.state !== 'confirmed' && r.state !== 'fallback' && r.state !== 'closed')) { el.innerHTML = '<p class="empty">Doctor, blood bank, family and district alerts appear here once a hospital confirms or the medical college is the destination.</p>'; return; }
+    if (!r || (r.state !== 'confirmed' && r.state !== 'fallback' && r.state !== 'closed')) { el.innerHTML = '<p class="empty">Doctor, blood bank, family and district alerts appear here once a hospital confirms or the medical college is the destination.</p>' + outboxCard(); return; }
     var h = fac(r.state === 'fallback' ? 'mc' : (r.confirmed || r.proposal));
     var p = r.patient || D.mother;
     var cards = [
@@ -218,7 +237,16 @@
     ];
     if (r.districtAlert) cards.push(card('District officer', 'Alert', M.fill('district', { id: r.id })));
     if (r.state === 'closed') cards.push(card('PHC and ASHA', 'Outcome', M.fill('asha', { name: p.name })));
-    el.innerHTML = cards.join('');
+    el.innerHTML = cards.join('') + outboxCard();
+  }
+
+  function outboxCard() {
+    if (!LIVE || !S.outbox.length) return '';
+    var label = { sent: 'Sent', simulated: 'Shown on screen', 'no-phone': 'No phone set', failed: 'Failed' };
+    var rows = S.outbox.slice().reverse().map(function (o) {
+      return '<li><b>' + esc(o.label) + '</b> · ' + esc(label[o.status] || o.status) + (o.channel && o.channel !== 'screen' && o.channel !== 'none' ? ' by ' + esc(o.channel) : '') + (o.error ? ' · ' + esc(o.error) : '') + '<br>' + esc(o.text) + '</li>';
+    }).join('');
+    return '<div class="card"><div class="lbl">Message log</div><ul class="log">' + rows + '</ul></div>';
   }
 
   function card(who, tag, text) { return '<div class="card"><div class="lbl">' + esc(who) + ' · ' + esc(tag) + '</div><p>' + esc(text) + '</p></div>'; }
@@ -253,16 +281,77 @@
       else if (a === 'reply') { var v = b.dataset.v; hospitalReply(v, v === 'ready-in' ? 15 : null, null); }
       else if (a === 'ivr') ivrAnswer(b.dataset.v);
       else if (a === 'skip') skipTwoMinutes();
+      else if (a === 'arrived' && LIVE) act('arrived', { value: b.dataset.v });
+      else if (a === 'outcome' && LIVE) act('outcome', { value: b.dataset.v });
       else if (a === 'arrived') { if (b.dataset.v === 'Yes') { S.step = 'close'; S.cur = Object.assign({}, S.cur, { arrived: 'Yes' }); say('nurse', 'Yes, arrived'); say('bot', M.T.outcomeQ); render(); } else closeOut(b.dataset.v, null); }
       else if (a === 'outcome') closeOut('Yes', b.dataset.v);
     });
     setInterval(tick, 500);
   }
 
+  function randomHex(n) {
+    var a = new Uint8Array(n / 2); (root.crypto || {}).getRandomValues ? root.crypto.getRandomValues(a) : a.forEach(function (_, i) { a[i] = Math.floor(Math.random() * 256); });
+    return Array.prototype.map.call(a, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  }
+
+  function headers() { var h = { 'content-type': 'application/json' }; if (KEY) h['x-live-key'] = KEY; return h; }
+
+  function modeNote(text, cls) {
+    var el = document.getElementById('mode-note'); if (!el) return;
+    el.hidden = !text; el.textContent = text || ''; el.className = 'banner ' + (cls || '');
+  }
+
+  function sync(st) {
+    OFFSET = st.serverTime - Date.now();
+    D.replyWindowSec = st.replyWindowSec;
+    S.facilities = st.facilities; S.refs = st.refs; S.cur = st.cur; S.chat = st.chat; S.step = st.step; S.scenario = st.scenario; S.outbox = st.outbox || [];
+    var sig = JSON.stringify([st.facilities, st.refs, st.cur, st.chat, st.step, st.scenario, st.outbox]);
+    if (sig !== LAST) { LAST = sig; render(); }
+  }
+
+  function act(action, args) {
+    if (BUSY) return Promise.resolve();
+    BUSY = true;
+    return fetch('/api/act', { method: 'POST', headers: headers(), body: JSON.stringify({ sid: SID, action: action, args: args || {} }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Error'); sync(j); }); })
+      .catch(function (e) { modeNote('Could not reach the server: ' + e.message + ' Try again.', 'warnb'); })
+      .then(function () { BUSY = false; });
+  }
+
+  function poll() {
+    if (BUSY) return;
+    fetch('/api/state?sid=' + SID, { headers: headers() }).then(function (r) { return r.json(); }).then(function (j) { if (!BUSY && j.facilities) sync(j); }).catch(function () {});
+  }
+
+  // Use the live server when it answers. Without one (a static page), fall back to the local demo.
+  function connect() {
+    var p = new URLSearchParams(root.location.search);
+    KEY = p.get('key') || null;
+    if (KEY) SID = 'live';
+    else {
+      try { SID = root.localStorage.getItem('mk-sid'); } catch (e) { SID = null; }
+      if (!SID || !/^[a-f0-9]{16}$/.test(SID)) { SID = randomHex(16); try { root.localStorage.setItem('mk-sid', SID); } catch (e) {} }
+    }
+    return fetch('/api/state?sid=' + SID, { headers: headers() })
+      .then(function (r) { if (!r.ok) throw new Error('no server'); return r.json(); })
+      .then(function (st) {
+        if (!st.facilities) throw new Error('no server');
+        LIVE = true;
+        document.body.classList.add('is-live');
+        modeNote(st.live
+          ? 'LIVE: real WhatsApp messages and a real phone call go to the team test phones. The 2-minute timer runs on the server.'
+          : 'Live server: this is your own private session. The 2-minute timer runs on the server. Messages are shown on screen and are not sent to any phone.', st.live ? 'liveb' : '');
+        sync(st);
+        setInterval(poll, 1500);
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
   function init() {
     if (!document.getElementById('nurse-body')) return;
     bind();
-    reset('confirms');
+    connect().then(function (ok) { if (!ok) reset('confirms'); });
   }
 
   MK.app = { init: init, _state: S };

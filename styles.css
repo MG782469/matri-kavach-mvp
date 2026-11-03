@@ -58,3 +58,11 @@ th{color:var(--grey);font-weight:bold;font-size:12px}
 .empty{color:var(--grey)}
 .foot{margin-top:20px;color:var(--grey);font-size:12px;border-top:1px solid var(--line);padding-top:10px}
 @media (max-width:420px){ h1{font-size:22px} .logo{width:110px} }
+
+/* Live server mode */
+.banner.liveb{background:var(--ok-bg);color:var(--green)}
+.banner.warnb{background:var(--bad-bg);color:var(--bad)}
+.is-live [data-scn="silent"]{display:none}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.log li{font-size:13px;line-height:1.4;border-top:1px solid var(--line);padding-top:8px;overflow-wrap:anywhere}
+.log li:first-child{border-top:0;padding-top:0}
