@@ -48,3 +48,7 @@ Deploy on Render: Web Service, build `npm install`, start `npm start`, environme
 ## Static fallback
 
 `index.html` also works as a static page (no server): it falls back to an in-browser demo with a scripted hospital.
+
+## One-click Render setup
+
+`render.yaml` is a Render Blueprint. On Render: New, Blueprint, pick this repo. It fills in the service name, region, build and start commands, generates `LIVE_KEY`, and asks for `DATABASE_URL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TEST_PHONE`. `TEST_PHONE` is one phone that plays the nurse, hospitals, doctor and family.

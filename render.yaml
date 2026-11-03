@@ -1,0 +1,25 @@
+# Render Blueprint: one click creates the web service with every setting filled in.
+# Render asks you to paste the values marked sync: false. LIVE_KEY is generated for you.
+services:
+  - type: web
+    name: matri-kavach
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: LIVE_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TEST_PHONE
+        sync: false

@@ -8,10 +8,13 @@ const ROLE_ENV = {
 };
 
 const digits = (p) => String(p || '').replace(/\D/g, '');
-const phoneFor = (role) => process.env[ROLE_ENV[role]] || '';
+/* TEST_PHONE is one number that stands in for the nurse, the hospitals, the doctor and the family during the team test.
+   Blood bank, ASHA and district alerts stay on screen unless their own phone is set (this saves trial messages). */
+const TEST_ROLES = ['nurse', 'chc', 'dh', 'sdh', 'mc', 'doctor', 'family'];
+const phoneFor = (role) => process.env[ROLE_ENV[role]] || (TEST_ROLES.includes(role) ? process.env.TEST_PHONE || '' : '');
 const sameNumber = (a, b) => digits(a).length >= 10 && digits(a).slice(-10) === digits(b).slice(-10);
 const configured = () => Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
-const baseUrl = () => (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+const baseUrl = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
 
 function roleForNumber(num) {
   return Object.keys(ROLE_ENV).filter((r) => sameNumber(phoneFor(r), num));
@@ -45,7 +48,7 @@ async function sendText(live, role, text) {
       await twilio('Messages', { To: e164(to), From: process.env.TWILIO_SMS_FROM, Body: text });
       return { status: 'sent', channel: 'sms' };
     }
-    await twilio('Messages', { To: waNumber(to), From: 'whatsapp:' + e164(process.env.TWILIO_WHATSAPP_FROM || ''), Body: text });
+    await twilio('Messages', { To: waNumber(to), From: 'whatsapp:' + e164(process.env.TWILIO_WHATSAPP_FROM || '+14155238886'), Body: text });
     if (process.env.SMS_ALSO === '1' && process.env.TWILIO_SMS_FROM && role === 'family') {
       await twilio('Messages', { To: e164(to), From: process.env.TWILIO_SMS_FROM, Body: text });
     }

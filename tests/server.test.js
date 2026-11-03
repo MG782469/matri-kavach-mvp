@@ -151,3 +151,17 @@ test('Twilio signature check rejects a forged webhook and accepts a signed one',
   delete process.env.TWILIO_AUTH_TOKEN; process.env.SKIP_TWILIO_SIGNATURE = '1';
   h.server.close();
 });
+
+test('TEST_PHONE stands in for team roles but not for blood bank, ASHA or district; Render address is used by default', () => {
+  const n = require('../server/notify.js');
+  const keep = { ...process.env };
+  for (const k of ['PHONE_NURSE', 'PHONE_DH', 'PHONE_DOCTOR', 'PHONE_FAMILY', 'PHONE_BLOODBANK', 'PUBLIC_BASE_URL']) delete process.env[k];
+  process.env.TEST_PHONE = '+919811111111';
+  process.env.RENDER_EXTERNAL_URL = 'https://matri-kavach.onrender.com/';
+  assert.strictEqual(n.phoneFor('dh'), '+919811111111');
+  assert.strictEqual(n.phoneFor('family'), '+919811111111');
+  assert.strictEqual(n.phoneFor('bloodbank'), '');
+  assert.strictEqual(n.phoneFor('asha'), '');
+  assert.strictEqual(n.baseUrl(), 'https://matri-kavach.onrender.com');
+  Object.assign(process.env, keep); delete process.env.TEST_PHONE; delete process.env.RENDER_EXTERNAL_URL;
+});
