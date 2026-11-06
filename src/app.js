@@ -7,6 +7,7 @@
 
   function now() { return Date.now() + OFFSET; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function typeOf() { var id = (S.cur && S.cur.type) || 'bleeding'; return D.emergencyTypes.filter(function (t) { return t.id === id; })[0]; }
   function fac(id) { return S.facilities.filter(function (f) { return f.id === id; })[0]; }
   function setCur(r) { S.cur = r; if (!r) return; S.refs = S.refs.some(function (x) { return x.id === r.id; }) ? S.refs.map(function (x) { return x.id === r.id ? r : x; }) : S.refs.concat([r]); }
   function say(from, text) { S.chat.push({ from: from, text: text }); }
@@ -16,7 +17,7 @@
     S.scenario = id;
     S.facilities = D.facilities.map(function (f) {
       if (f.kind !== 'hospital' || id !== 'nobody') return Object.assign({}, f, { checkin: f.checkin ? Object.assign({}, f.checkin, { items: Object.assign({}, f.checkin.items) }) : null });
-      return Object.assign({}, f, { checkin: { shift: 'night', items: Object.assign({}, f.checkin.items, { blood: false }) } });
+      return Object.assign({}, f, { checkin: { shift: 'night', items: Object.assign({}, f.checkin.items, { blood: false, anaesthetist: false }) } });
     });
   }
 
@@ -39,7 +40,8 @@
 
   function submitDetails() {
     var v = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
-    S.form = { name: v('f-name'), age: v('f-age'), blood: v('f-blood'), contact: v('f-contact'), time: v('f-time'), mode: v('f-mode'), oxy: v('f-oxy'), miso: v('f-miso'), iv: v('f-iv') };
+    S.form = { name: v('f-name'), age: v('f-age'), blood: v('f-blood'), contact: v('f-contact') };
+    (D.forms[typeOf().id] || D.forms.bleeding).forEach(function (q) { S.form[q.id] = v('f-' + q.id); });
     if (LIVE) return act('details', { patient: S.form });
     S.cur = Object.assign({}, S.cur, { patient: S.form });
     say('nurse', 'Details sent: ' + S.form.name + ', ' + S.form.age + ', ' + S.form.blood + ', delivered ' + S.form.time);
@@ -173,13 +175,12 @@
     if (S.step === 'start') {
       body = '<div class="opts">' + D.emergencyTypes.map(function (t) { return '<button class="opt" data-act="type" data-id="' + t.id + '">' + esc(t.label) + '</button>'; }).join('') + '</div>';
     } else if (S.step === 'details') {
-      var p = (r && r.patient) || { name: D.mother.name, age: D.mother.age, blood: D.mother.bloodGroup, contact: D.mother.contact, time: D.mother.deliveredAt, mode: 'Normal', oxy: 'Yes', miso: 'Yes', iv: 'Yes' };
+      var p = (r && r.patient) || { name: D.mother.name, age: D.mother.age, blood: D.mother.bloodGroup, contact: D.mother.contact };
+      var form = D.forms[typeOf().id] || D.forms.bleeding;
       body = '<div class="form">' +
         field('f-name', 'Name', p.name) + field('f-age', 'Age', p.age) + field('f-blood', 'Blood group (MCP card)', p.blood) +
-        field('f-contact', 'Family contact', p.contact) + field('f-time', 'Time of delivery', p.time) +
-        select('f-mode', 'Mode of delivery', ['Normal', 'Caesarean', 'Not yet delivered'], p.mode) +
-        select('f-oxy', 'Oxytocin 10 IU given?', ['Yes', 'No'], p.oxy) + select('f-miso', 'Misoprostol 600 mcg given?', ['Yes', 'No'], p.miso) +
-        select('f-iv', 'IV line in place?', ['Yes', 'No'], p.iv) +
+        field('f-contact', 'Family contact', p.contact) +
+        form.map(function (q) { return q.options ? select('f-' + q.id, q.label, q.options, p[q.id] || q.options[0]) : field('f-' + q.id, q.label, p[q.id] || q.value || ''); }).join('') +
         '<button class="btn primary" data-act="details">Send details</button></div>';
     } else if (S.step === 'proposed') {
       body = '<div class="opts"><button class="btn primary" data-act="send">SEND</button><button class="btn" data-act="change">CHANGE</button></div>';
@@ -199,7 +200,7 @@
   function select(id, label, opts, value) { return '<label class="fld">' + label + '<select id="' + id + '">' + opts.map(function (o) { return '<option' + (o === value ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></label>'; }
 
   function checklistRows(f) {
-    return D.checklistItems.map(function (it) {
+    return E.itemsFor(typeOf().id, D).map(function (it) {
       var ok = f.checkin && f.checkin.items[it.id] === true;
       return '<li><span>' + esc(it.label) + '</span><b class="' + (ok ? 'yes' : 'no') + '">' + (ok ? 'Yes' : 'No') + '</b></li>';
     }).join('');
@@ -212,7 +213,7 @@
     if (S.cur.state === 'fallback') target = fac('mc');
     var p = S.cur.patient || D.mother;
     var html = '<div class="card"><div class="lbl">Incoming referral to ' + esc(target.name) + '</div>' +
-      '<p>' + esc(M.fill('incoming', { eta: E.etaMinutes(target.km, D), group: p.blood || D.mother.bloodGroup })) + '</p>' +
+      '<p>' + esc(M.fill('incoming', { type: typeOf().short, needs: typeOf().needs, eta: E.etaMinutes(target.km, D), group: p.blood || D.mother.bloodGroup })) + '</p>' +
       '<ul class="checks">' + checklistRows(target) + '</ul></div>';
     if (S.cur.state === 'sent' || S.cur.state === 'routed') {
       html += '<div class="opts"><button class="btn primary" data-act="reply" data-v="all-ready">1 All ready</button>' +
@@ -220,7 +221,7 @@
         '<button class="btn" data-act="reply" data-v="not-available">3 Not available</button></div>';
       if (S.cur.state === 'sent') html += '<div class="status">Reply window: <span data-cd class="timer">02:00</span> <button class="btn small" data-act="skip">Skip 2 minutes (demo)</button></div>';
     }
-    if (S.cur.state === 'ivr') html += '<div class="card"><div class="lbl">IVR call to duty phone</div><p>' + esc(M.fill('ivrScript', { eta: E.etaMinutes(target.km, D) })) + '</p><div class="opts"><button class="btn primary" data-act="ivr" data-v="1">Press 1</button><button class="btn" data-act="ivr" data-v="none">No answer</button></div></div>';
+    if (S.cur.state === 'ivr') html += '<div class="card"><div class="lbl">IVR call to duty phone</div><p>' + esc(M.fill('ivrScript', { type: typeOf().short, eta: E.etaMinutes(target.km, D) })) + '</p><div class="opts"><button class="btn primary" data-act="ivr" data-v="1">Press 1</button><button class="btn" data-act="ivr" data-v="none">No answer</button></div></div>';
     el.innerHTML = html;
   }
 
@@ -256,14 +257,17 @@
     var refs = S.refs;
     var closed = refs.filter(function (r) { return r.state === 'closed'; }).length;
     var rate = E.closedLoopRate(refs);
+    var TYPES = D.emergencyTypes.filter(function (t) { return t.signed; });
     var rows = S.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
-      var st = E.facilityStatus(f, D);
-      var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">Uncertain</span>' : '<span class="pill bad">Not ready</span>';
-      return '<tr><td>' + esc(f.short) + '</td><td>' + pill + '</td><td>' + E.etaMinutes(f.km, D) + ' min</td><td>' + esc(f.blood) + '</td></tr>';
+      var pills = TYPES.map(function (t) {
+        var st = E.facilityStatus(f, D, t.id);
+        return '<td>' + (st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">Uncertain</span>' : '<span class="pill bad">Not ready</span>') + '</td>';
+      }).join('');
+      return '<tr><td>' + esc(f.short) + '</td>' + pills + '<td>' + E.etaMinutes(f.km, D) + ' min</td><td>' + esc(f.blood) + '</td></tr>';
     }).join('');
     var list = refs.length ? refs.map(function (r) { return '<li>' + esc(r.id) + ' · ' + esc(r.state) + (r.destination ? ' · ' + esc(fac(r.destination) ? fac(r.destination).short : r.destination) : '') + '</li>'; }).join('') : '<li>No referrals yet.</li>';
     el.innerHTML = '<div class="tile kpi"><div class="lbl">Referral loop closure rate</div><div class="big">' + Math.round(rate * 100) + '%</div><p>' + closed + ' of ' + refs.length + ' referrals closed. Synthetic data.</p></div>' +
-      '<div class="card"><div class="lbl">Readiness tonight, heavy bleeding checklist</div><table><tr><th>Hospital</th><th>Status</th><th>ETA</th><th>Blood</th></tr>' + rows + '</table></div>' +
+      '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
       '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>';
   }
 

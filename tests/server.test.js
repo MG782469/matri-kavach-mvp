@@ -280,3 +280,77 @@ test('nurse chat starts empty and Hi opens the menu', async () => {
     assert.match(r.chat[3].text, /Type Hi/);
   } finally { h.server.close(); }
 });
+
+test('fits / eclampsia referral: own form, own alert text, review label, no blood bank alert', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'startReferral', { typeId: 'fits' })).body;
+    assert.ok(r.chat.some((m) => /pending obstetrician validation/.test(m.text)));
+    r = (await h.act(SID, 'details', { patient: { name: 'Sunita', age: '22', blood: 'O+', contact: '98XXXXXX22', fits: '2', lastfit: '22:10', bp: '168/112', weeks: '34 weeks', mgso4: 'Yes', antihtn: 'Yes', iv: 'Yes' } })).body;
+    assert.strictEqual(r.cur.proposal, 'sdh');
+    assert.strictEqual(r.cur.patient.bp, '168/112');
+    r = (await h.act(SID, 'send', {})).body;
+    const inc = r.outbox.find((o) => o.role === 'sdh');
+    assert.match(inc.text, /INCOMING: Fits \/ eclampsia/);
+    assert.match(inc.text, /magnesium sulphate/);
+    r = (await h.act(SID, 'hospitalReply', { kind: 'all-ready' })).body;
+    assert.strictEqual(r.cur.state, 'confirmed');
+    assert.ok(!r.outbox.some((o) => o.role === 'bloodbank'));
+    const link = r.outbox.find((o) => o.role === 'doctor').text.match(/\/s\/[a-f0-9.]+/)[0];
+    const page = await (await fetch(h.base + link)).text();
+    assert.match(page, /Latest BP/);
+    assert.match(page, /168\/112/);
+    assert.match(page, /pending obstetrician validation/);
+  } finally { h.server.close(); }
+});
+
+test('obstructed labour is still blocked: the nurse is told to call the doctor', async () => {
+  const h = await boot();
+  try {
+    const r = (await h.act(SID, 'startReferral', { typeId: 'obstructed' })).body;
+    assert.strictEqual(r.cur, null);
+    assert.match(r.chat[r.chat.length - 1].text, /Call the doctor/);
+  } finally { h.server.close(); }
+});
+
+test('108 driver gets pickup and hospital only, never patient details', async () => {
+  const h = await boot();
+  try {
+    let r = (await toSent(h, SID)).body;
+    const trip = r.outbox.find((o) => o.role === 'driver');
+    assert.match(trip.text, /PHC Rampur/);
+    assert.match(trip.text, /DH Devgarh/);
+    assert.ok(!/Lakshmi|B\+|Oxytocin/.test(trip.text));
+    r = (await h.act(SID, 'hospitalReply', { kind: 'all-ready' })).body;
+    assert.ok(r.outbox.some((o) => o.role === 'driver' && /confirmed/.test(o.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'bloodbank' && /^B\+ alert/.test(o.text)));
+    const fam = r.outbox.find((o) => o.role === 'family').text;
+    assert.ok(!/bleeding|Oxytocin|B\+/i.test(fam));
+  } finally { h.server.close(); }
+});
+
+test('shared shift check-in: saving it changes readiness for every emergency type', async () => {
+  const h = await boot();
+  try {
+    const items = Object.fromEntries(require('../server/session.js').ALL_ITEMS.map((i) => [i.id, true]));
+    let r = (await h.act(SID, 'checkin', { facility: 'dh', items })).body;
+    const msg = r.outbox.filter((o) => o.role === 'dh').pop().text;
+    assert.match(msg, /13 Yes, 0 No/);
+    assert.match(msg, /Heavy bleeding, Fits \/ eclampsia/);
+    await h.act(SID, 'startReferral', { typeId: 'fits' });
+    r = (await h.act(SID, 'details', { patient: { name: 'S', age: '22', blood: 'O+' } })).body;
+    assert.strictEqual(r.cur.proposal, 'dh');
+  } finally { h.server.close(); }
+});
+
+test('missed check-in: hospital turns Uncertain, gets a reminder, district is told, bleeding goes to SDH', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'missCheckin', { facility: 'dh' })).body;
+    assert.strictEqual(r.facilities.find((f) => f.id === 'dh').checkin, null);
+    assert.ok(r.outbox.some((o) => o.role === 'dh' && /Reminder/.test(o.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'district' && /has not done/.test(o.text)));
+    r = (await toSent(h, SID)).body;
+    assert.strictEqual(r.cur.proposal, 'sdh');
+  } finally { h.server.close(); }
+});

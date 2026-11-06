@@ -71,3 +71,19 @@ test('closed-loop rate changes as referrals close', () => {
   const confirmed = E.onHospitalReply(E.sendTo(E.propose(b, D.facilities, D, 2), 2), 'dh', { kind: 'all-ready' }, D.facilities, D, 3);
   assert.strictEqual(E.closedLoopRate([a, E.onClose(confirmed, 'Yes', 'Delivered', 4)]), 1);
 });
+
+test('fits / eclampsia: DH has no HDU bed tonight, so SDH Kheri is proposed; bleeding still goes to DH', () => {
+  const fits = E.propose(E.startReferral('fits', 0), D.facilities, D, 0);
+  assert.strictEqual(fits.proposal, 'sdh');
+  assert.strictEqual(E.facilityStatus(D.facilities.find(f => f.id === 'dh'), D, 'fits'), 'not-ready');
+  assert.strictEqual(E.facilityStatus(D.facilities.find(f => f.id === 'dh'), D, 'bleeding'), 'ready');
+  assert.deepStrictEqual(E.itemsFor('fits', D).map(i => i.id), ['mgso4', 'antihtn', 'obstetrician', 'anaesthetist', 'airway', 'lab', 'theatre', 'hdu', 'newborn']);
+  assert.strictEqual(E.itemsFor('bleeding', D).length, 7);
+});
+
+test('fits: an unknown item (missing in the check-in) is never Ready', () => {
+  const items = Object.assign({}, D.facilities.find(f => f.id === 'sdh').checkin.items);
+  delete items.mgso4;
+  const f = withCheckin('sdh', items).find(x => x.id === 'sdh');
+  assert.strictEqual(E.facilityStatus(f, D, 'fits'), 'not-ready');
+});

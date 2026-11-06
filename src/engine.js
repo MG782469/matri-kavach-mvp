@@ -11,17 +11,25 @@
 
   // Ready = every checklist item yes in the current shift.
   // Uncertain = no check-in in the current shift. Never routed as Ready.
-  function facilityStatus(f, D) {
+  // The checklist items one emergency type needs. Unknown type = the heavy bleeding list.
+  function itemsFor(typeId, D) {
+    var all = D.checklistItems.concat(D.extraItems || []);
+    var t = (D.emergencyTypes || []).filter(function (x) { return x.id === typeId; })[0];
+    if (!t || !t.items) return D.checklistItems;
+    return t.items.map(function (id) { return all.filter(function (it) { return it.id === id; })[0]; }).filter(Boolean);
+  }
+
+  function facilityStatus(f, D, typeId) {
     if (!f.checkin) return 'uncertain';
-    var ok = D.checklistItems.every(function (item) { return f.checkin.items[item.id] === true; });
+    var ok = itemsFor(typeId, D).every(function (item) { return f.checkin.items[item.id] === true; });
     return ok ? 'ready' : 'not-ready';
   }
 
-  function candidatesFor(facilities, D, tried) {
+  function candidatesFor(facilities, D, tried, typeId) {
     tried = tried || [];
     return facilities
       .filter(function (f) { return f.kind === 'hospital' && tried.indexOf(f.id) === -1; })
-      .filter(function (f) { return facilityStatus(f, D) === 'ready'; })
+      .filter(function (f) { return facilityStatus(f, D, typeId) === 'ready'; })
       .map(function (f) { return { id: f.id, name: f.short, km: f.km, eta: etaMinutes(f.km, D) }; })
       .sort(function (a, b) { return a.eta - b.eta || a.km - b.km; });
   }
@@ -40,7 +48,7 @@
   }
 
   function propose(ref, facilities, D, now) {
-    var c = candidatesFor(facilities, D, ref.tried);
+    var c = candidatesFor(facilities, D, ref.tried, ref.type);
     if (c.length) {
       var first = c[0];
       return Object.assign({}, ref, { state: 'routed', proposal: first.id, destination: first.id,
@@ -51,7 +59,7 @@
 
   function changeProposal(ref, facilities, D, now) {
     if (ref.state !== 'routed') return ref;
-    var c = candidatesFor(facilities, D, ref.tried.concat([ref.proposal]));
+    var c = candidatesFor(facilities, D, ref.tried.concat([ref.proposal]), ref.type);
     if (!c.length) return ref;
     var next = c[0];
     return Object.assign({}, ref, { proposal: next.id, destination: next.id,
@@ -121,7 +129,7 @@
   }
 
   var api = {
-    etaMinutes: etaMinutes, facilityStatus: facilityStatus, candidatesFor: candidatesFor,
+    etaMinutes: etaMinutes, itemsFor: itemsFor, facilityStatus: facilityStatus, candidatesFor: candidatesFor,
     startReferral: startReferral, propose: propose, changeProposal: changeProposal, sendTo: sendTo,
     onHospitalReply: onHospitalReply, onTimeout: onTimeout, onIVR: onIVR, onClose: onClose,
     closedLoopRate: closedLoopRate, sendToFallback: sendToFallback, reroute: reroute

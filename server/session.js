@@ -12,7 +12,7 @@ const SCENARIOS = ['confirms', 'silent', 'nobody'];
 
 const seedFacilities = (scenario) => D0.facilities.map((f) => {
   const checkin = f.checkin ? { shift: f.checkin.shift, items: Object.assign({}, f.checkin.items) } : null;
-  if (f.kind === 'hospital' && scenario === 'nobody') checkin.items.blood = false;
+  if (f.kind === 'hospital' && scenario === 'nobody') { checkin.items.blood = false; checkin.items.anaesthetist = false; }
   return Object.assign({}, f, { checkin });
 });
 
@@ -39,38 +39,49 @@ async function tell(s, ctx, role, label, text) {
   s.outbox = s.outbox.slice(-60);
 }
 
+const typeOf = (s) => D0.emergencyTypes.find((x) => x.id === (s.cur && s.cur.type)) || D0.emergencyTypes[0];
+const formFor = (typeId) => D0.forms[typeId] || D0.forms.bleeding;
+
 function summaryLink(s, ctx, hospital) {
-  const p = s.cur.patient || D0.mother;
+  const p = s.cur.patient || {};
+  const t = typeOf(s);
   const token = s.id + '.' + crypto.randomBytes(8).toString('hex');
   const dest = fac(s, hospital);
-  s.links[token] = { expires: ctx.now() + LINK_TTL_MS, hospital: dest.name, eta: eta(dest), ref: s.cur.id, patient: {
-    name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), delivered: clean(p.time, 20),
-    oxytocin: clean(p.oxy, 4), misoprostol: clean(p.miso, 4), iv: clean(p.iv, 4), mode: clean(p.mode, 20) } };
+  s.links[token] = { expires: ctx.now() + LINK_TTL_MS, hospital: dest.name, eta: eta(dest), ref: s.cur.id,
+    type: t.label, review: t.review || '',
+    patient: { name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), blood: clean(p.blood || D0.mother.bloodGroup, 6) },
+    facts: formFor(t.id).map((q) => ({ label: q.label, value: clean(p[q.id], 20) })) };
   return (ctx.baseUrl() || '') + '/s/' + token;
 }
 
 const incomingText = (s, f) => {
   const p = (s.cur && s.cur.patient) || D0.mother;
-  return M.fill('incoming', { eta: eta(f), group: clean(p.blood, 6) || D0.mother.bloodGroup }) +
+  const t = typeOf(s);
+  return M.fill('incoming', { type: t.short, needs: t.needs, eta: eta(f), group: clean(p.blood, 6) || D0.mother.bloodGroup }) +
     ' Reply with the number. For 2, add the minutes, for example: 2 20.';
 };
+const ivrText = (s, f) => M.fill('ivrScript', { type: typeOf(s).short, eta: eta(f) });
 
 async function startReferral(s, ctx, a) {
   const t = D0.emergencyTypes.find((x) => x.id === a.typeId);
   if (!t) return s;
   if (!t.signed) { say(s, 'bot', M.T.typeNotSigned); return s; }
   setCur(s, E.startReferral(t.id, ctx.now()));
-  s.step = 'details'; say(s, 'nurse', t.label); say(s, 'bot', M.T.details);
+  s.step = 'details'; say(s, 'nurse', t.label);
+  if (t.review) say(s, 'bot', M.fill('reviewNote', { review: t.review }));
+  say(s, 'bot', M.T.details);
   return s;
 }
 
 async function details(s, ctx, a) {
   if (!s.cur || s.step !== 'details') return s;
   const p = a.patient || {};
-  const patient = { name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), contact: clean(p.contact, 20), time: clean(p.time, 20),
-    mode: clean(p.mode, 20), oxy: clean(p.oxy, 4), miso: clean(p.miso, 4), iv: clean(p.iv, 4) };
+  const patient = { name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), contact: clean(p.contact, 20) };
+  const form = formFor(s.cur.type);
+  form.forEach((q) => { patient[q.id] = clean(p[q.id], 20); });
   s.cur = Object.assign({}, s.cur, { patient });
-  say(s, 'nurse', `Details sent: ${patient.name}, ${patient.age}, ${patient.blood}, delivered ${patient.time}`);
+  const key = form.slice(0, 2).map((q) => q.label + ' ' + patient[q.id]).join(', ');
+  say(s, 'nurse', `Details sent: ${patient.name}, ${patient.age}, ${patient.blood}. ${key}`);
   const r = E.propose(s.cur, s.facilities, CFG, ctx.now());
   setCur(s, r);
   if (r.state === 'fallback') await goFallback(s, ctx);
@@ -81,6 +92,7 @@ async function details(s, ctx, a) {
 async function goFallback(s, ctx) {
   const mc = fac(s, 'mc');
   say(s, 'bot', M.T.fallback); s.step = 'close';
+  await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: mc.short, km: mc.km }));
   await tell(s, ctx, 'mc', 'Medical college', incomingText(s, mc));
   await tell(s, ctx, 'district', 'District officer', M.fill('district', { id: s.cur.id }));
   await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, 'mc'));
@@ -98,7 +110,9 @@ async function send(s, ctx) {
   if (!s.cur || s.cur.state !== 'routed') return s;
   const r = E.sendTo(s.cur, ctx.now());
   setCur(s, r); s.step = 'waiting'; say(s, 'nurse', 'SEND'); say(s, 'bot', M.T.sent);
-  await tell(s, ctx, r.proposal, fac(s, r.proposal).short, incomingText(s, fac(s, r.proposal)));
+  const h = fac(s, r.proposal);
+  await tell(s, ctx, 'driver', '108 driver', M.fill('driver', { from: D0.startPoint.name, hospital: h.short, km: h.km }));
+  await tell(s, ctx, r.proposal, h.short, incomingText(s, h));
   return s;
 }
 
@@ -110,13 +124,15 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     s.step = 'close';
     await tell(s, ctx, 'nurse', 'Nurse', minutes ? M.fill('readyIn', { hospital: h.short, min: minutes, time: arrive }) : M.fill('ready', { hospital: h.short, time: arrive }));
     await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, h.id));
-    await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short }));
+    if (typeOf(s).bloodBank) await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short, group: clean(((s.cur && s.cur.patient) || {}).blood, 6) || D0.mother.bloodGroup }));
+    await tell(s, ctx, 'driver', '108 driver', M.fill('driverOk', { hospital: h.short }));
     await tell(s, ctx, 'family', 'Family', M.fill('family', { hospital: h.short, eta: eta(h) }));
   } else if (r.state === 'fallback') {
     await goFallback(s, ctx);
   } else if (r.state === 'sent' && r.proposal !== prev) {
     const h = fac(s, r.proposal);
     say(s, 'bot', M.fill('reroute', { hospital: h.short })); s.step = 'waiting';
+    await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: h.short, km: h.km }));
     await tell(s, ctx, h.id, h.short, incomingText(s, h));
   }
 }
@@ -195,7 +211,7 @@ async function tick(s, ctx) {
       setCur(s, r); s.ivrAt = ctx.now();
       const h = fac(s, r.proposal);
       say(s, 'bot', M.fill('silent', { hospital: h.short }));
-      const script = M.fill('ivrScript', { eta: eta(h) });
+      const script = ivrText(s, h);
       const call = await ctx.call(s.live, r.proposal, r.id, script);
       s.outbox.push({ at: ctx.now(), role: r.proposal, label: 'No-reply call to ' + h.short, text: script, status: call.status, channel: call.channel || 'voice', error: call.error || null });
     }
@@ -221,11 +237,41 @@ async function nurseText(s, ctx, a) {
   return s;
 }
 
-const ACTIONS = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, outcome, reset };
+const ALL_ITEMS = D0.checklistItems.concat(D0.extraItems || []);
+const ROUTED_TYPES = D0.emergencyTypes.filter((t) => t.signed);
+
+/* Shift check-in from a hospital's labour room phone: one Yes/No per item, shared by every emergency type. */
+async function checkin(s, ctx, a) {
+  const f = fac(s, String(a.facility || ''));
+  if (!f || (f.kind !== 'hospital' && f.kind !== 'fallback')) return s;
+  const given = a.items || {};
+  const items = {};
+  ALL_ITEMS.forEach((it) => { if (given[it.id] === true || given[it.id] === false) items[it.id] = given[it.id]; });
+  f.checkin = { shift: 'night', items, at: ctx.now(), by: f.who };
+  f.missed = false;
+  const yes = ALL_ITEMS.filter((it) => items[it.id] === true).length;
+  const unknown = ALL_ITEMS.filter((it) => items[it.id] !== true && items[it.id] !== false).length;
+  const readyFor = ROUTED_TYPES.filter((t) => E.facilityStatus(f, CFG, t.id) === 'ready').map((t) => t.short);
+  await tell(s, ctx, f.id, f.short, M.fill('checkinSaved', { hospital: f.short, who: f.who, yes, no: ALL_ITEMS.length - yes - unknown,
+    missing: unknown ? ', ' + unknown + ' not answered (counted as not ready)' : '', readyFor: readyFor.length ? readyFor.join(', ') : 'none' }));
+  return s;
+}
+
+/* Demo: a hospital misses its shift check-in. It turns Uncertain, gets a reminder, and the district officer is told. */
+async function missCheckin(s, ctx, a) {
+  const f = fac(s, String(a.facility || 'dh'));
+  if (!f || f.kind !== 'hospital' || (s.cur && ['routed', 'sent', 'ivr'].includes(s.cur.state))) return s;
+  f.checkin = null; f.missed = true;
+  await tell(s, ctx, f.id, f.short, M.fill('checkinRemind', { hospital: f.short }));
+  await tell(s, ctx, 'district', 'District officer', M.fill('checkinEscalate', { hospital: f.short }));
+  return s;
+}
+
+const ACTIONS = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, outcome, reset, checkin, missCheckin };
 
 function publicView(s, now) {
   return { id: s.id, live: s.live, scenario: s.scenario, facilities: s.facilities, refs: s.refs, cur: s.cur, chat: s.chat,
     step: s.step, outbox: s.outbox.slice(-20), serverTime: now, replyWindowSec: CFG.replyWindowSec };
 }
 
-module.exports = { CFG, blank, tick, ACTIONS, publicView, clock, eta };
+module.exports = { CFG, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS };

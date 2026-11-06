@@ -175,7 +175,7 @@ function createApp(opts = {}) {
     const s = await store.get('live');
     const c = s && s.cur;
     const h = c && s.facilities.find((f) => f.id === c.proposal);
-    const text = h ? M.fill('ivrScript', { eta: S.eta(h) }) : 'Matri-Kavach. No referral is waiting.';
+    const text = h ? S.ivrText(s, h) : 'Matri-Kavach. No referral is waiting.';
     const action = notify.baseUrl() + '/twilio/voice-gather?ref=' + encodeURIComponent(String(req.query.ref || ''));
     twiml(res, `<Gather numDigits="1" timeout="10" action="${esc(action)}" method="POST"><Say voice="alice" language="en-IN">${esc(text)}</Say></Gather><Say>No input received. Goodbye.</Say>`);
   });
@@ -204,13 +204,13 @@ function createApp(opts = {}) {
     if (!l) return page('Link not found', '<h1>Link not found</h1><p>This summary link does not exist.</p>');
     if (ctx.now() > l.expires) return res.status(410).type('html').send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link expired</title><body style="font-family:Arial;padding:20px"><h1 style="color:#1f3da9">Link expired</h1><p>This summary link was valid for 2 hours and has expired.</p>');
     const p = l.patient;
+    const facts = (l.facts || []).map((f) => `<dt>${esc(f.label)}</dt><dd>${esc(f.value) || 'Not recorded'}</dd>`).join('');
     page('Referral summary', `<h1>Referral summary</h1><div class="c"><dl>
+      <dt>Emergency (chosen by nurse)</dt><dd>${esc(l.type || '')}</dd>
       <dt>Patient</dt><dd>${esc(p.name)}, ${esc(p.age)} years</dd>
-      <dt>Blood group</dt><dd>${esc(p.blood)}</dd>
-      <dt>Delivery</dt><dd>${esc(p.mode)}, ${esc(p.delivered)}</dd>
-      <dt>Given before transfer</dt><dd>Oxytocin: ${esc(p.oxytocin)}. Misoprostol: ${esc(p.misoprostol)}. IV line: ${esc(p.iv)}</dd>
+      <dt>Blood group</dt><dd>${esc(p.blood)}</dd>${facts}
       <dt>Going to</dt><dd>${esc(l.hospital)}, about ${esc(l.eta)} min</dd></dl></div>
-      <p class="n">Facts only, no diagnosis. Synthetic demo data. Link expires ${esc(new Date(l.expires).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }))} IST.</p>`);
+      ${l.review ? `<p class="n">Checklist: ${esc(l.review)}.</p>` : ''}<p class="n">Facts only, no diagnosis. Synthetic demo data. Link expires ${esc(new Date(l.expires).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }))} IST.</p>`);
   });
 
   /* ---- Static web app ---- */

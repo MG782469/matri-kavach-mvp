@@ -4,6 +4,8 @@
   var MK = root.MK, D = MK.DATA, M = MK.messages;
   var SID = null, KEY = null, ST = null, OFFSET = 0, BUSY = false, LAST = '', VIEW = 'nurse', SEEN = null;
   var ECHO = {}; // replies tapped on a hospital phone in this browser, shown as sent messages
+  var CK = null; // check-in being filled on a hospital phone: { facility, items }
+  var ALL_ITEMS = D.checklistItems.concat(D.extraItems || []);
 
   var PHONES = [
     { id: 'nurse', label: 'Nurse', owner: 'Nurse Kavitha, PHC Rampur' },
@@ -14,6 +16,7 @@
     { id: 'doctor', label: 'Doctor', owner: 'Receiving doctor' },
     { id: 'bloodbank', label: 'Blood bank', owner: 'Blood bank' },
     { id: 'family', label: 'Family', owner: 'Mother’s family' },
+    { id: 'driver', label: '108 driver', owner: '108 ambulance driver' },
     { id: 'district', label: 'District officer', owner: 'District MH officer' },
     { id: 'asha', label: 'PHC and ASHA', owner: 'PHC and ASHA Sunita' }
   ];
@@ -25,6 +28,7 @@
   function clock(ms) { return new Date(ms).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }).toLowerCase(); }
   function fac(id) { return ((ST && ST.facilities) || D.facilities).filter(function (f) { return f.id === id; })[0]; }
   function cur() { return ST && ST.cur; }
+  function typeOf() { var id = (cur() && cur().type) || 'bleeding'; return D.emergencyTypes.filter(function (t) { return t.id === id; })[0]; }
   function isHospital(id) { var f = fac(id); return f && (f.kind === 'hospital' || f.kind === 'fallback'); }
 
   /* ---------- messages for one phone ---------- */
@@ -71,7 +75,8 @@
     var list = msgsFor(VIEW), r = cur(), html = '<div class="day">Today</div>';
     html += '<div class="sysmsg">🔒 Messages here are the same texts Matri-Kavach sends on WhatsApp. Synthetic demo data.</div>';
     if (!list.length && VIEW === 'nurse') html += '<div class="sysmsg">Say <b>Hi</b> to Matri-Kavach to start. Type it below or tap the Hi chip.</div>';
-    else if (!list.length) html += '<div class="empty">' + emptyText(VIEW) + '</div>';
+    if (isHospital(VIEW)) html += checkinBar(VIEW);
+    if (!list.length && VIEW !== 'nurse') html += '<div class="empty">' + emptyText(VIEW) + '</div>';
     var lastIn = -1; list.forEach(function (m, i) { if (m.dir === 'in') lastIn = i; });
     var lastIncoming = -1; list.forEach(function (m, i) { if (m.incoming) lastIncoming = i; });
     list.forEach(function (m, i) {
@@ -98,6 +103,14 @@
     countdown();
   }
 
+  function checkinBar(id) {
+    var f = fac(id);
+    if (!f.checkin) return '<div class="sysmsg warnmsg">⚠ Night shift check-in <b>not done</b>. This hospital shows as Uncertain and gets no referrals. <button data-act="checkin-open">Do check-in</button></div>';
+    var yes = ALL_ITEMS.filter(function (it) { return f.checkin.items[it.id] === true; }).length;
+    var ready = D.emergencyTypes.filter(function (t) { return t.signed && MK.engine.facilityStatus(f, D, t.id) === 'ready'; }).map(function (t) { return t.short; });
+    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.who) + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button></div>';
+  }
+
   function emptyText(role) {
     if (role === 'nurse') return 'Starting…';
     if (isHospital(role)) return 'No referral for this hospital yet. Messages arrive here only when Matri-Kavach picks it.';
@@ -115,14 +128,14 @@
     var others = PHONES.reduce(function (n, x) { return x.id === VIEW ? n : n + Math.max(0, countIn(x.id) - (SEEN[x.id] || 0)); }, 0);
     $('owner').innerHTML = '\ud83d\udcf1 Phone of <b>' + esc(p.owner) + '</b> <span class="sw">Switch phone \u25be</span>' + (others ? '<span class="badge">' + others + '</span>' : '');
     var nurseNew = VIEW === 'nurse' && (!ST.chat.length || ST.step === 'done');
-    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="Hello">Hello</button><button data-act="say" data-v="Namaste">Namaste</button>' : '';
+    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="Hello">Hello</button><button data-act="say" data-v="Namaste">Namaste</button><button data-act="help">How to test</button>' : '';
   }
 
   /* ---------- side panel: what to tap next, the case, readiness ---------- */
   function next() {
     var r = cur(), step = ST.step;
     if (!r && !ST.chat.length) return ['nurse', 'On the Nurse phone, type Hi (or tap the Hi chip). Matri-Kavach answers with the menu.'];
-    if (!r || step === 'start') return ['nurse', 'On the Nurse phone, tap Choose emergency and pick heavy bleeding after delivery.'];
+    if (!r || step === 'start') return ['nurse', 'On the Nurse phone, tap Choose emergency. Pick heavy bleeding, or fits / eclampsia to see that readiness differs by emergency.'];
     if (step === 'details') return ['nurse', 'Tap Fill patient details. The values are filled in for you, just tap Send.'];
     if (step === 'proposed') return ['nurse', 'Matri-Kavach picked the nearest hospital that said ready this shift. Tap SEND, or CHANGE to pick the next one.'];
     if (r.state === 'sent') return [r.proposal, 'The ambulance is already moving. Open the ' + fac(r.proposal).short + ' phone and tap 1 All ready, or tap Skip 2 minutes to see what happens when nobody replies.'];
@@ -147,11 +160,18 @@
         (r.patient ? '<dt>Mother</dt><dd>' + esc(r.patient.name) + ', ' + esc(r.patient.age) + ', ' + esc(r.patient.blood) + '</dd>' : '') + '</dl></div>';
     }
     var rows = ST.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
-      var st = MK.engine.facilityStatus(f, D);
+      var st = MK.engine.facilityStatus(f, D, typeOf().id);
       var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">No check-in</span>' : '<span class="pill bad">Not ready</span>';
       return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km</dd>';
     }).join('');
-    html += '<div class="panel"><h2>Tonight’s readiness (heavy bleeding)</h2><dl class="kv">' + rows + '</dl></div>';
+    html += '<div class="panel"><h2>Tonight’s readiness (' + esc(typeOf().short.toLowerCase()) + ')</h2><dl class="kv">' + rows + '</dl>' + (typeOf().review ? '<p class="sub2">' + esc(typeOf().review) + '</p>' : '') + '</div>';
+    html += '<div class="panel"><h2>Who sees what</h2><dl class="kv">' +
+      '<dt>Hospital</dt><dd>Emergency, ETA, blood group, nurse facts</dd>' +
+      '<dt>Doctor</dt><dd>Private summary link, expires</dd>' +
+      '<dt>Blood bank</dt><dd>Blood group and hospital only</dd>' +
+      '<dt>108 driver</dt><dd>Pickup and hospital only, no medical details</dd>' +
+      '<dt>Family</dt><dd>Hospital and ETA only, no medical details</dd>' +
+      '<dt>District</dt><dd>Case ID and alerts, no patient name</dd></dl></div>';
     $('side').innerHTML = html;
     $('skip').hidden = !(r && r.state === 'sent');
     document.querySelectorAll('[data-scn]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scn === ST.scenario)); });
@@ -161,7 +181,7 @@
   function renderCall() {
     var r = cur(), show = r && r.state === 'ivr' && VIEW === r.proposal;
     $('call').hidden = !show;
-    if (show) $('call-script').textContent = M.fill('ivrScript', { eta: MK.engine.etaMinutes(fac(r.proposal).km, D) });
+    if (show) $('call-script').textContent = M.fill('ivrScript', { type: typeOf().short, eta: MK.engine.etaMinutes(fac(r.proposal).km, D) });
   }
 
   function render() {
@@ -191,22 +211,42 @@
       (r && r.state === 'sent' ? '<button class="opt" data-act="skip"><span>Skip 2 minutes<small>See what happens when the hospital stays silent</small></span></button>' : '') +
       '<button class="opt" data-scn="confirms"><span>New case: hospital confirms</span></button>' +
       '<button class="opt" data-scn="nobody"><span>New case: no hospital ready<small>Nobody passes the checklist tonight</small></span></button>' +
+      ((!r || r.state === 'closed' || r.state === 'confirmed') ? '<button class="opt" data-act="miss"><span>Demo: DH Devgarh misses the night check-in<small>It turns Uncertain, gets a reminder, district is told</small></span></button>' : '') +
+      '<button class="opt" data-act="help"><span>How to test</span></button>' +
       '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
       '<a class="opt" href="' + esc($('classic').getAttribute('href')) + '"><span>Open the dashboard view</span></a>');
   }
+  function checkinSheet(id) {
+    var f = fac(id);
+    if (!CK || CK.facility !== id) CK = { facility: id, items: f.checkin ? Object.assign({}, f.checkin.items) : {} };
+    var rows = ALL_ITEMS.map(function (it) {
+      var v = CK.items[it.id];
+      return '<div class="ck"><span>' + esc(it.label) + '</span><span class="yn"><button data-act="ck" data-v="' + it.id + ':1" aria-pressed="' + (v === true) + '">Yes</button><button data-act="ck" data-v="' + it.id + ':0" aria-pressed="' + (v === false) + '">No</button></span></div>';
+    }).join('');
+    openSheet('<h3>Night shift check-in</h3><p class="sub2">' + esc(f.short) + ' · ' + esc(f.who) + '. One check-in covers every emergency. Not answered = not ready.</p>' + rows + '<button class="go" data-act="ck-save">Save check-in</button>');
+  }
+  function helpSheet() {
+    openSheet('<h3>How to test (2 minutes)</h3><ol class="help">' +
+      '<li><b>Nurse phone:</b> type <b>Hi</b>, tap <b>Choose emergency</b>, pick <b>Heavy bleeding</b>, then <b>Fill patient details</b> and Send. The values are filled in.</li>' +
+      '<li><b>See the routing:</b> CHC Sonpur is skipped (no anaesthetist tonight) and DH Devgarh is proposed. Tap <b>SEND</b>.</li>' +
+      '<li><b>Switch phone</b> (bar under the header) to <b>DH Devgarh</b> and tap <b>1 All ready</b>. Then look at the Doctor, Family and 108 driver phones.</li>' +
+      '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li></ol>' +
+      '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
+  }
   function typeSheet() {
     openSheet('<h3>Choose emergency</h3>' + D.emergencyTypes.map(function (t, i) {
-      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? '' : '<small>Checklist not signed yet</small>') + '</span><span class="radio"></span></button>';
+      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? (t.review ? '<small>' + esc(t.review) + '</small>' : '') : '<small>Checklist not reviewed yet: call the doctor</small>') + '</span><span class="radio"></span></button>';
     }).join('') + '<button class="go" data-act="type-send">Send</button>');
   }
   function detailsSheet() {
     var m = D.mother;
     function f(id, label, v) { return '<label>' + label + '<input id="' + id + '" value="' + esc(v) + '"></label>'; }
     function s(id, label, opts, v) { return '<label>' + label + '<select id="' + id + '">' + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></label>'; }
-    openSheet('<h3>Patient details</h3>' + f('f-name', 'Name', m.name) + '<div class="two">' + f('f-age', 'Age', m.age) + f('f-blood', 'Blood group (MCP card)', m.bloodGroup) + '</div>' +
-      f('f-contact', 'Family contact', m.contact) + '<div class="two">' + f('f-time', 'Time of delivery', m.deliveredAt) + s('f-mode', 'Mode of delivery', ['Normal', 'Caesarean', 'Not yet delivered'], 'Normal') + '</div>' +
-      '<div class="two">' + s('f-oxy', 'Oxytocin 10 IU given?', ['Yes', 'No'], 'Yes') + s('f-miso', 'Misoprostol 600 mcg?', ['Yes', 'No'], 'Yes') + '</div>' +
-      s('f-iv', 'IV line in place?', ['Yes', 'No'], 'Yes') + '<button class="go" data-act="details-send">Send</button>');
+    var t = typeOf(), form = D.forms[t.id] || D.forms.bleeding;
+    var qs = form.map(function (q) { return q.options ? s('f-' + q.id, q.label, q.options, q.options[0]) : f('f-' + q.id, q.label, q.value || ''); });
+    var pairs = ''; for (var i = 0; i < qs.length; i += 2) pairs += qs[i + 1] ? '<div class="two">' + qs[i] + qs[i + 1] + '</div>' : qs[i];
+    openSheet('<h3>Patient details: ' + esc(t.short) + '</h3><p class="sub2">Facts only. Yes / No / Unknown, never a guess.</p>' + f('f-name', 'Name', m.name) + '<div class="two">' + f('f-age', 'Age', m.age) + f('f-blood', 'Blood group (MCP card)', m.bloodGroup) + '</div>' +
+      f('f-contact', 'Family contact', m.contact) + pairs + '<button class="go" data-act="details-send">Send</button>');
   }
 
   /* ---------- server ---------- */
@@ -251,11 +291,18 @@
       else if (a === 'say') typed(v);
       else if (a === 'pick-type') typeSheet();
       else if (a === 'open-details') detailsSheet();
+      else if (a === 'checkin-open') checkinSheet(VIEW);
+      else if (a === 'ck') { var kv = v.split(':'); CK.items[kv[0]] = kv[1] === '1'; b.parentNode.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); }); }
+      else if (a === 'ck-save') { var c = CK; CK = null; closeSheet(); act('checkin', { facility: c.facility, items: c.items }); }
+      else if (a === 'miss') { closeSheet(); act('missCheckin', { facility: 'dh' }).then(function () { show('dh'); }); }
+      else if (a === 'help') helpSheet();
+      else if (a === 'help-close') closeSheet();
       else if (a === 'type') document.querySelectorAll('.sheet .opt').forEach(function (o) { o.setAttribute('aria-checked', String(o === b)); });
       else if (a === 'type-send') { var sel = document.querySelector('.sheet .opt[aria-checked="true"]'); closeSheet(); act('startReferral', { typeId: sel ? sel.dataset.v : 'bleeding' }); }
       else if (a === 'details-send') {
         var g = function (id) { var el = $(id); return el ? el.value : ''; };
-        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact'), time: g('f-time'), mode: g('f-mode'), oxy: g('f-oxy'), miso: g('f-miso'), iv: g('f-iv') };
+        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact') };
+        (D.forms[typeOf().id] || D.forms.bleeding).forEach(function (q) { patient[q.id] = g('f-' + q.id); });
         closeSheet(); act('details', { patient: patient });
       }
       else if (a === 'send') act('send', {});
@@ -314,6 +361,8 @@
         else note('Your own private session on the live server. Messages show on these screens and are not sent to any real phone. Synthetic data only.');
         sync(st);
         setInterval(poll, 1500);
+        var seen = null; try { seen = root.localStorage.getItem('mk-help-seen'); } catch (e) {}
+        if (!seen && !q.get('phone')) { helpSheet(); try { root.localStorage.setItem('mk-help-seen', '1'); } catch (e) {} }
       })
       .catch(function () { $('msgs').innerHTML = '<div class="empty">This view needs the live server. Open matri-kavach.onrender.com/chat</div>'; });
   }
