@@ -59,11 +59,66 @@
     feedback: 'Feedback from [hospital] on referral [id]: [value]. For the PHC monthly review, to learn, not to blame.',
     checkinSaved: 'Shift check-in saved for [hospital] by [who]: [yes] Yes, [no] No[missing]. Ready tonight for: [readyFor].',
     checkinRemind: 'Reminder: the night shift check-in for [hospital] is not done. Until you check in, this hospital shows as Uncertain and gets no referrals. Open the check-in and tap Yes or No for each item.',
-    checkinEscalate: '[hospital] has not done the night shift check-in. It is shown as Uncertain and gets no referrals until it checks in.'
+    checkinEscalate: '[hospital] has not done the night shift check-in. It is shown as Uncertain and gets no referrals until it checks in.',
+    // Ask 2 hospitals at once
+    parallelNurse: 'Also asked at the same time as backup: [backup]. [hospital] is nearer and has priority.',
+    parallelIncoming: 'You are asked as BACKUP together with [primary], which is nearer and has priority. Please still reply now. If [primary] confirms, you will get a CANCELLED message.',
+    backupYesNurse: '[backup] (backup) said ready. Waiting for [hospital], which is nearer, until its time runs out.',
+    backupNoNurse: '[backup] (backup) is not available.',
+    cancelled: 'CANCELLED for referral [id]: [hospital] has confirmed, so you are no longer needed. Thank you for replying. Please release anything you kept ready.',
+    nowFirst: 'You are now the FIRST choice for referral [id]: the nearer hospital could not take her. The ambulance is coming to you. Please reply now: 1 All ready, 2 Ready in __ min, 3 Not available.',
+    rerouteBackup: '[hospital] could not take her. Going to [backup], which was already asked. Ambulance has been told.',
+    // Staffing and supply
+    staffGap: 'Staffing gap: [hospital] has only [n] nurse(s) on duty tonight (minimum [min]). Check-in by [who].',
+    supplyIdea: 'Supply idea (OFF by default, not approved, routing did not change): [hospital] is nearer and lacks only [items] for this [type] case. [from] has them. If approved, these could be sent from [from], amounts as per the signed checklist.',
+    // ASHA home emergency
+    ashaStart: 'Home emergency from ASHA [asha]: [type] at [place] (location shared). Matri-Kavach is finding a ready hospital.',
+    ashaSent: '108 is coming to [place]. Going to [hospital], about [eta] min. Keep the MCP card ready.',
+    driverHome: '108 trip: pick up at [place] (home, location shared by the ASHA). Go to [hospital], [km] km. The hospital is confirming now.',
+    // SMS fallback
+    smsNote: '(SMS, the family has no WhatsApp)',
+    draftNote: 'Draft checklist for clinical review (not reviewed yet, not routed): [items]. Call the doctor now.'
   };
-  function fill(key, vars) {
-    return T[key].replace(/\[(\w+)\]/g, function (_, k) { return vars && vars[k] != null ? vars[k] : '[' + k + ']'; });
+  /* Hindi texts for the nurse chat and the family. Written by the tech team; pending review by M Gufran before any real use.
+     Placeholders stay the same. Keys without a Hindi text fall back to English. */
+  var HI = {
+    hello: 'नमस्ते! यह मातृ-कवच है, PHC रामपुर के लिए आपातकालीन रेफ़रल सहायता। रेफ़रल शुरू करने के लिए Choose emergency दबाएँ।',
+    sayHi: 'नया आपातकालीन रेफ़रल शुरू करने के लिए Hi लिखें, या BLEED B+ जैसा छोटा शब्द भेजें।',
+    busy: 'एक रेफ़रल चल रहा है। कृपया ऊपर दिए बटन इस्तेमाल करें।',
+    typeNotSigned: 'इस आपातकाल की चेकलिस्ट की अभी समीक्षा नहीं हुई है। अभी डॉक्टर को फ़ोन करें।',
+    reviewNote: 'चेकलिस्ट की स्थिति: [review]।',
+    details: 'मरीज़ का विवरण। आप इसे अभी या बाद में भेज सकती हैं।',
+    quick: 'शब्द से तुरंत रेफ़रल: [type], ब्लड ग्रुप [group]। बाकी विवरण जब हो सके भेजें।',
+    proposed: '[hospital] को भेज रहे हैं, [km] किमी, लगभग [eta] मिनट। पुष्टि के लिए SEND दबाएँ, या दूसरा चुनने के लिए CHANGE।',
+    lastCheck: 'पिछली तैयारी जाँच: [time], [who] द्वारा (शिफ़्ट चेक-इन में खुद बताया गया)। इस केस के लिए अभी पुष्टि नहीं हुई: [hospital] को जवाब देना होगा।',
+    lastCheckOld: 'पिछली तैयारी जाँच: [time], [hours] घंटे से ज़्यादा पुरानी। [hospital] के जवाब तक इसे पुष्टि न मानें।',
+    lastCheckNone: '[hospital] ने इस शिफ़्ट में तैयारी जाँच दर्ज नहीं की। जवाब आने तक इसे पुष्टि न मानें।',
+    sent: 'एम्बुलेंस 108 को अस्पताल बता दिया गया है। अस्पताल से पुष्टि माँगी जा रही है। हम आपको बताएँगे।',
+    ready: '[hospital]: सब तैयार। माँ लगभग [time] तक पहुँचेंगी।',
+    readyIn: '[hospital]: [min] मिनट में तैयार। माँ लगभग [time] तक पहुँचेंगी।',
+    silent: '[hospital] से अभी जवाब नहीं आया। ड्यूटी फ़ोन पर कॉल किया जा रहा है।',
+    reroute: 'बैकअप [hospital] को भेजा गया। एम्बुलेंस को बता दिया गया है।',
+    fallback: 'किसी अस्पताल ने तैयारी की पुष्टि नहीं की। ज़िला आपातकालीन एस्केलेशन शुरू किया गया। मेडिकल कॉलेज को तृतीयक विकल्प के रूप में प्रस्तावित किया गया है, यह क्लिनिकल समन्वय और राज्य रेफ़रल प्रोटोकॉल पर निर्भर है।',
+    fallbackWait: '[hospital] की पुष्टि का इंतज़ार है। तब तक यह केवल प्रस्तावित है, स्वीकार नहीं।',
+    fallbackDeclined: '[hospital] रेफ़रल [id] के लिए पुष्टि नहीं कर सकता। ज़िला अधिकारी और डॉक्टर अब गंतव्य तय करेंगे।',
+    closeQ: 'क्या माँ पहुँच गईं? दबाएँ: 1 हाँ, 2 नहीं, 3 कहीं और भेजी गईं।',
+    readyQ: 'पहुँचने पर क्या सब कुछ तैयार था? दबाएँ: 1 हाँ, सब तैयार। 2 नहीं, कुछ कम था।',
+    missingQ: 'क्या कम था? एक दबाएँ।',
+    outcomeQ: 'नतीजा: 1 प्रसव हुआ, 2 अन्य।',
+    closed: 'धन्यवाद। PHC और आशा को सारांश मिल जाएगा।',
+    family: '[hospital], लगभग [eta] मिनट। MCP कार्ड और आधार साथ लाएँ।',
+    parallelNurse: 'बैकअप के रूप में साथ ही पूछा गया: [backup]। [hospital] नज़दीक है और उसे प्राथमिकता है।',
+    backupYesNurse: '[backup] (बैकअप) ने कहा तैयार। नज़दीकी [hospital] के समय खत्म होने तक इंतज़ार।',
+    backupNoNurse: '[backup] (बैकअप) उपलब्ध नहीं है।',
+    rerouteBackup: '[hospital] उसे नहीं ले सका। [backup] को भेजा गया, उससे पहले ही पूछा जा चुका था। एम्बुलेंस को बता दिया गया है।',
+    ashaStart: 'आशा [asha] से घर पर आपातकाल: [type], [place] (लोकेशन भेजी गई)। मातृ-कवच तैयार अस्पताल ढूँढ रहा है।',
+    ashaSent: '108 [place] आ रही है। [hospital] जा रहे हैं, लगभग [eta] मिनट। MCP कार्ड तैयार रखें।',
+    draftNote: 'क्लिनिकल समीक्षा के लिए ड्राफ़्ट चेकलिस्ट (अभी समीक्षा नहीं हुई, रूट नहीं होता): [items]। अभी डॉक्टर को फ़ोन करें।'
+  };
+  function fill(key, vars, lang) {
+    var src = lang === 'hi' && HI[key] ? HI[key] : T[key];
+    return src.replace(/\[(\w+)\]/g, function (_, k) { return vars && vars[k] != null ? vars[k] : '[' + k + ']'; });
   }
-  if (typeof module !== 'undefined' && module.exports) module.exports = { T: T, fill: fill };
-  root.MK = root.MK || {}; root.MK.messages = { T: T, fill: fill };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { T: T, HI: HI, fill: fill };
+  root.MK = root.MK || {}; root.MK.messages = { T: T, HI: HI, fill: fill };
 })(typeof window !== 'undefined' ? window : globalThis);

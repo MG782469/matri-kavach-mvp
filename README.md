@@ -20,9 +20,25 @@ Emergency types: heavy bleeding (checklist signed by the clinical partner) and f
 
 The call screen in `/chat` is labelled *Automated call (demo)*. The demo makes no encryption or security claim.
 
+## More features (from the future-ideas list, added 6 Nov)
+
+All in the `/chat` view, mostly from the ⋮ menu. Synthetic data; labels say what is a demo or a mock.
+
+- **Ask 2 hospitals at once** (on by default, can be switched off in District settings). SEND asks the nearest ready hospital and the next one as backup. The nearer one has priority: if it confirms, the backup gets CANCELLED. If the backup says yes first and the nearer one says no, or stays silent for the reply time, the backup is confirmed at once and the nearer one is told it is no longer needed. If the nearer one says no before the backup answers, the backup becomes first choice with a fresh timer and the next hospital is asked as the new backup.
+- **Blood stock per group**: each hospital's check-in can record units per blood group. A mother whose group is known is only routed to a hospital with a unit of her group (for example, B- goes to SDH Kheri because DH has none). Unknown group: the check-in's blood item decides.
+- **Nurses on duty** in the shift check-in; fewer than 2 alerts the district (staffing gap).
+- **Hindi** nurse chat (District settings). The family gets Hindi and English. The Hindi texts are written by the tech team and are pending review by the clinical partner.
+- **Hospital editor and settings**: add or remove a hospital (it starts Uncertain until it checks in), reply time 1, 2 or 3 minutes.
+- **District map**: synthetic positions, destination line and dashed backup line. No live ambulance tracking (108 owns GPS).
+- **ASHA home emergency**: the ASHA shares a (synthetic) village location; distances are counted from the home and 108 is sent at once.
+- **Supply idea**: OFF by default and not approved. When on, it only advises the district if a nearer hospital lacks only movable items (blood, drugs, IV fluids). Routing never changes because of it.
+- **Role logins (RBAC demo)**: phone number = role, one-time code shown on screen. Logged in, the screen and the API show only that role's messages and allow only that role's actions; the driver, family and district never get the mother's name.
+- **More emergencies as drafts**: obstructed labour, APH, sepsis and newborn show a draft checklist for clinical review and are never routed; the nurse is told to call the doctor.
+- **SMS fallback** for a family without WhatsApp (real SMS needs a paid Twilio number). **ABDM / e-RaktKosh**: HFR IDs, the ABHA field and the e-RaktKosh stock fill are mocks, not connected.
+
 ## How routing works (plain code, no AI)
 
-`src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital, no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).
+`src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital (with ask-2-at-once, the next ready hospital is asked as backup at the same moment), no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).
 
 ## Simulation (synthetic, in `sim/`)
 

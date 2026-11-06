@@ -5,7 +5,32 @@
     speedKmh: 30,
     detourFactor: 1.4,
     replyWindowSec: 120,
-    startPoint: { id: 'phc', name: 'PHC Rampur', nurse: 'Kavitha' },
+    startPoint: { id: 'phc', name: 'PHC Rampur', nurse: 'Kavitha', x: 20, y: 50 },
+    // Synthetic map (km grid) for the district view and for ASHA home emergencies. Not real places.
+    villages: [
+      { id: 'bhuiyan', name: 'Village Bhuiyan', x: 12, y: 62 },
+      { id: 'kesla', name: 'Village Kesla', x: 33, y: 40 }
+    ],
+    bloodGroups: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'],
+    // Items that can be sent from another hospital (idea: inter-hospital supply). OFF by default, not approved.
+    movableItems: ['blood', 'uterotonics', 'iv', 'mgso4', 'antihtn'],
+    // Minimum nurses on duty before the district is told about a staffing gap (demo rule).
+    minNurses: 2,
+    // Demo role logins (RBAC): synthetic numbers, the one-time code is shown on screen. Not real numbers.
+    roleLogins: [
+      { role: 'nurse', label: 'PHC nurse', phone: '90000 00001' },
+      { role: 'dh', label: 'DH Devgarh labour room', phone: '90000 00002' },
+      { role: 'sdh', label: 'SDH Kheri labour room', phone: '90000 00003' },
+      { role: 'chc', label: 'CHC Sonpur duty phone', phone: '90000 00004' },
+      { role: 'mc', label: 'GMC Rajnagar emergency desk', phone: '90000 00005' },
+      { role: 'doctor', label: 'Receiving doctor', phone: '90000 00006' },
+      { role: 'bloodbank', label: 'Blood bank', phone: '90000 00007' },
+      { role: 'driver', label: '108 driver', phone: '90000 00008' },
+      { role: 'emt', label: '108 EMT', phone: '90000 00009' },
+      { role: 'family', label: 'Family', phone: '90000 00010' },
+      { role: 'district', label: 'District officer', phone: '90000 00011' },
+      { role: 'asha', label: 'ASHA', phone: '90000 00012' }
+    ],
     mother: { name: 'Lakshmi Devi', age: 24, bloodGroup: 'B+', deliveredAt: '22:41', contact: '98XXXXXX10' },
     // Heavy bleeding checklist: the 7 items signed by M Gufran (clinical partner).
     checklistItems: [
@@ -28,19 +53,23 @@
       { id: 'newborn', label: 'Newborn resuscitation and preterm newborn care available' }
     ],
     facilities: [
-      { id: 'chc', name: 'CHC Sonpur', short: 'CHC Sonpur', km: 9, role: 'CHC', kind: 'hospital',
+      { id: 'chc', name: 'CHC Sonpur', short: 'CHC Sonpur', km: 9, role: 'CHC', kind: 'hospital', x: 27, y: 45, nurses: 1, hfr: 'IN0000DEMO01',
+        bloodStock: { 'O+': 2 },
         blood: 'O+ 2 units', who: 'Duty nurse', ini: 'S',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: false, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: false, hdu: false, newborn: false } } },
-      { id: 'dh', name: 'District Hospital Devgarh', short: 'DH Devgarh', km: 21, role: 'Labour room in-charge', kind: 'hospital',
+      { id: 'dh', name: 'District Hospital Devgarh', short: 'DH Devgarh', km: 21, role: 'Labour room in-charge', kind: 'hospital', x: 40, y: 57, nurses: 3, hfr: 'IN0000DEMO02',
+        bloodStock: { 'A+': 4, 'B+': 6, 'O+': 5, 'AB+': 1, 'O-': 1 },
         blood: 'B+ 6 units', who: 'Sister Anjali', ini: 'A',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: false, newborn: true } } },
-      { id: 'sdh', name: 'Sub-district Hospital Kheri', short: 'SDH Kheri', km: 25, role: 'Labour room in-charge', kind: 'hospital',
+      { id: 'sdh', name: 'Sub-district Hospital Kheri', short: 'SDH Kheri', km: 25, role: 'Labour room in-charge', kind: 'hospital', x: 10, y: 27, nurses: 2, hfr: 'IN0000DEMO03',
+        bloodStock: { 'A+': 2, 'B+': 3, 'O+': 4, 'B-': 1, 'A-': 1 },
         blood: 'B+ 3 units', who: 'Sister Rekha', ini: 'R',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: true, newborn: true } } },
-      { id: 'mc', name: 'Govt Medical College Rajnagar', short: 'GMC Rajnagar', km: 52, role: 'Obstetrics emergency desk', kind: 'fallback',
+      { id: 'mc', name: 'Govt Medical College Rajnagar', short: 'GMC Rajnagar', km: 52, role: 'Obstetrics emergency desk', kind: 'fallback', x: 70, y: 34, nurses: 6, hfr: 'IN0000DEMO04',
+        bloodStock: { 'A+': 12, 'B+': 21, 'O+': 18, 'AB+': 4, 'A-': 2, 'B-': 2, 'O-': 3, 'AB-': 1 },
         blood: 'B+ 21 units', who: 'Duty registrar', ini: 'G',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: true, newborn: true } } }
@@ -54,7 +83,15 @@
         items: ['mgso4', 'antihtn', 'obstetrician', 'anaesthetist', 'airway', 'lab', 'theatre', 'hdu', 'newborn'],
         needs: 'magnesium sulphate, HDU bed, obstetrician', bloodBank: false,
         review: 'Reviewed by clinical partner, pending obstetrician validation' },
-      { id: 'obstructed', label: 'Obstructed labour', signed: false },
+      // Drafts written by the tech team for clinical review. NOT routed: the nurse is told to call the doctor.
+      { id: 'obstructed', label: 'Obstructed labour', short: 'Obstructed labour', signed: false,
+        draft: ['Obstetrician on site', 'Anaesthetist on duty', 'Operating theatre free', 'Blood for her group', 'Newborn resuscitation ready'] },
+      { id: 'aph', label: 'Bleeding before delivery (APH)', short: 'APH', signed: false,
+        draft: ['Blood for her group', 'Obstetrician on site', 'Anaesthetist on duty', 'Operating theatre free', 'Ultrasound available', 'Newborn resuscitation ready'] },
+      { id: 'sepsis', label: 'Fever after delivery (possible sepsis)', short: 'Sepsis', signed: false,
+        draft: ['IV antibiotics in stock', 'Emergency lab open (blood counts, cultures)', 'HDU bed free', 'Obstetrician on call'] },
+      { id: 'newborn', label: 'Newborn emergency', short: 'Newborn', signed: false,
+        draft: ['SNCU bed free', 'Paediatrician on call', 'Oxygen and CPAP working', 'Radiant warmer working'] },
       { id: 'other', label: 'Other: call the doctor now', signed: false }
     ],
     // Baseline from our simulation of 20,000 synthetic night emergencies (not real data).

@@ -29,6 +29,7 @@ function createApp(opts = {}) {
       if (live && !canCall() && telegram.enabled()) return telegram.sendText(live, role, 'URGENT, no reply in 2 minutes. ' + text);
       return Object.assign({ channel: 'voice' }, await notify.placeCall(live, role, refId));
     },
+    sms: (live, role, text) => notify.sendSms(live, role, text),
     baseUrl: notify.baseUrl
   };
   const app = express();
@@ -79,7 +80,9 @@ function createApp(opts = {}) {
     const sid = resolveSid(req);
     if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
     const s = await withSession(sid, sid === 'live', async () => undefined);
-    const view = S.publicView(s, ctx.now());
+    const role = S.roleOf(s, ctx, req.get('x-role-token'));
+    if (req.get('x-role-token') && !role) return res.status(401).json({ error: 'Login expired. Log in again.' });
+    const view = S.roleView(S.publicView(s, ctx.now()), role);
     if (sid === 'live') { view.telegram = meta.enabled() ? null : telegram.links(); view.metaVerifyToken = meta.verifyToken(); }
     res.json(view);
   });
@@ -90,12 +93,37 @@ function createApp(opts = {}) {
     if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
     if (!act) return res.status(400).json({ error: 'Unknown action' });
     try {
-      const s = await withSession(sid, sid === 'live', (sess) => act(sess, ctx, req.body.args || {}));
-      res.json(S.publicView(s, ctx.now()));
+      const token = req.get('x-role-token');
+      let role = null, denied = false;
+      const s = await withSession(sid, sid === 'live', (sess) => {
+        role = S.roleOf(sess, ctx, token);
+        if ((token && !role) || !S.allowed(sess, role, String(req.body.action), req.body.args || {})) { denied = true; return undefined; }
+        return act(sess, ctx, req.body.args || {});
+      });
+      if (denied) return res.status(403).json({ error: token && !role ? 'Login expired. Log in again.' : 'This role cannot do that.' });
+      res.json(S.roleView(S.publicView(s, ctx.now()), role));
     } catch (e) {
       console.error('act failed', e);
       res.status(500).json({ error: 'Something went wrong. Try Reset.' });
     }
+  });
+
+  /* ---- Role login (demo RBAC): the code is shown on screen instead of an SMS ---- */
+  app.post('/api/login', limited, async (req, res) => {
+    const sid = resolveSid(req);
+    if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
+    let out = null;
+    await withSession(sid, sid === 'live', async (s) => { out = S.loginStart(s, ctx, req.body.phone); });
+    if (!out) return res.status(404).json({ error: 'This number is not registered for a role.' });
+    res.json(out);
+  });
+  app.post('/api/verify', limited, async (req, res) => {
+    const sid = resolveSid(req);
+    if (!sid) return res.status(403).json({ error: 'Bad session or live key' });
+    let out = null;
+    await withSession(sid, sid === 'live', async (s) => { out = S.loginVerify(s, ctx, req.body.phone, req.body.code); });
+    if (!out) return res.status(401).json({ error: 'Wrong or expired code.' });
+    res.json(out);
   });
 
   /* ---- Twilio webhooks (live session only) ---- */
@@ -125,14 +153,17 @@ function createApp(opts = {}) {
         if (s.step === 'close' || s.step === 'done' || !c || bot.length) return;
       }
       if (!c) return;
-      if (['sent', 'ivr', 'routed', 'fallback'].includes(c.state) && isRole(c.proposal)) {
-        if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready' }); reply = 'Thank you. Recorded: ALL READY.'; }
-        else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'not-available' }); reply = 'Recorded: not available. We are rerouting.'; }
+      const asked = ['sent', 'ivr', 'routed', 'fallback'].includes(c.state) && isRole(c.proposal) ? c.proposal
+        : ['sent', 'ivr'].includes(c.state) && c.backup && !c.backupYes && isRole(c.backup) ? c.backup : null;
+      if (asked) {
+        const isBackup = asked !== c.proposal;
+        if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready', facility: asked }); reply = isBackup ? 'Thank you. Recorded: ready, as backup. The nearer hospital has priority; we will tell you.' : 'Thank you. Recorded: ALL READY.'; }
+        else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'not-available', facility: asked }); reply = isBackup ? 'Recorded: not available.' : 'Recorded: not available. We are rerouting.'; }
         else if (/^2/.test(body)) {
           const m = body.match(/\d+/g);
           const minutes = m && m[1] ? Number(m[1]) : null;
           if (!minutes) reply = 'Please send 2 and the minutes, for example: 2 20';
-          else { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'ready-in', minutes }); reply = `Recorded: ready in ${minutes} min.`; }
+          else { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'ready-in', minutes, facility: asked }); reply = `Recorded: ready in ${minutes} min.`; }
         } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available).';
       }
     });
@@ -213,7 +244,7 @@ function createApp(opts = {}) {
     page('Referral summary', `<h1>Referral handover (ISBAR)</h1>
       <div class="c"><h2>I · Identify</h2><dl><dt>From</dt><dd>${esc(l.from || 'PHC nurse')}, referral ${esc(l.ref || '')}</dd><dt>Patient</dt><dd>${esc(p.name)}, ${esc(p.age)}${/^\d+$/.test(String(p.age)) ? ' years' : ''}</dd></dl></div>
       <div class="c"><h2>S · Situation</h2><dl><dt>Emergency (chosen by nurse)</dt><dd>${esc(l.type || '')}</dd><dt>Going to</dt><dd>${esc(l.hospital)}, about ${esc(l.eta)} min</dd></dl></div>
-      <div class="c"><h2>B · Background</h2><dl><dt>Blood group</dt><dd>${esc(p.blood)}</dd><dt>Family told details go to the hospital</dt><dd>${esc(l.informed || 'Not recorded')}</dd></dl></div>
+      <div class="c"><h2>B · Background</h2><dl><dt>Blood group</dt><dd>${esc(p.blood)}</dd>${p.abha ? `<dt>ABHA number (given by nurse, not verified: ABDM link is a mock in this demo)</dt><dd>${esc(p.abha)}</dd>` : ''}<dt>Family told details go to the hospital</dt><dd>${esc(l.informed || 'Not recorded')}</dd></dl></div>
       <div class="c"><h2>A · Nurse facts</h2><dl>${facts || '<dd>Not sent yet</dd>'}</dl></div>
       <div class="c"><h2>R · Request</h2><p>${l.needs ? 'Please have ready: ' + esc(l.needs) + '.' : 'Please be ready at the labour room door.'} Reply on the labour room phone if anything is missing.</p></div>
       ${l.review ? `<p class="n">Checklist: ${esc(l.review)}.</p>` : ''}<p class="n">Facts only, no diagnosis. Synthetic demo data. Link expires ${esc(new Date(l.expires).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }))} IST.</p>`);

@@ -11,18 +11,30 @@ const LINK_TTL_MS = 2 * 60 * 60 * 1000;
 const FULL_MS = 2 * 60 * 60 * 1000;
 const HOLD_MIN = Number(process.env.BLOOD_HOLD_MIN) || D0.bloodHoldMin || 60;
 const SCENARIOS = ['confirms', 'silent', 'nobody'];
+/* District settings for one session. Ask 2 hospitals at once is ON; supply top-up is OFF until approved. */
+const DEFAULTS = { parallel: true, replyWindowSec: null, lang: 'en', supply: false, smsFamily: false };
+const WINDOWS = [60, 120, 180];
+function ensure(s) {
+  s.settings = Object.assign({}, DEFAULTS, s.settings || {});
+  s.added = s.added || []; s.roleTokens = s.roleTokens || {}; s.otps = s.otps || {};
+  return s;
+}
+/* The engine config for this session: the reply window and the parallel ask come from the district settings. */
+const C = (s) => Object.assign({}, CFG, { parallel: Boolean(s.settings && s.settings.parallel),
+  replyWindowSec: (s.settings && s.settings.replyWindowSec) || CFG.replyWindowSec });
+const tr = (s, key, vars) => M.fill(key, vars || {}, s.settings && s.settings.lang);
 
 /* The demo night's check-ins are recorded at the moment the session is created (or reset), by the duty person named in the data. */
-const seedFacilities = (scenario, at) => D0.facilities.map((f) => {
-  const checkin = f.checkin ? { shift: f.checkin.shift, items: Object.assign({}, f.checkin.items), at, by: f.who } : null;
+const seedFacilities = (scenario, at, added) => D0.facilities.map((f) => {
+  const checkin = f.checkin ? { shift: f.checkin.shift, items: Object.assign({}, f.checkin.items), at, by: f.who, nurses: f.nurses } : null;
   if (f.kind === 'hospital' && scenario === 'nobody') { checkin.items.blood = false; checkin.items.anaesthetist = false; }
-  return Object.assign({}, f, { checkin });
-});
+  return Object.assign({}, f, { checkin, bloodStock: Object.assign({}, f.bloodStock || {}) });
+}).concat((added || []).map((f) => Object.assign({}, f, { checkin: null, bloodStock: {} })));
 
 function blank(id, live, scenario, now) {
   scenario = SCENARIOS.includes(scenario) ? scenario : 'confirms';
-  return { id, live: Boolean(live), scenario, facilities: seedFacilities(scenario, now || Date.now()), refs: [], cur: null,
-    chat: [], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
+  return ensure({ id, live: Boolean(live), scenario, facilities: seedFacilities(scenario, now || Date.now()), refs: [], cur: null,
+    chat: [], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 });
 }
 
 const fac = (s, id) => s.facilities.find((f) => f.id === id);
@@ -42,10 +54,16 @@ function setCur(s, r) {
 }
 
 async function tell(s, ctx, role, label, text) {
-  const r = await ctx.send(s.live, role, text);
+  const sms = role === 'family' && s.settings && s.settings.smsFamily;
+  let r = sms && ctx.sms ? await ctx.sms(s.live, role, text) : await ctx.send(s.live, role, text);
+  if (sms && !ctx.sms) r = Object.assign({}, r, { channel: 'sms' });
+  // WhatsApp did not go through to the family: try a plain SMS once.
+  if (!sms && role === 'family' && r.status === 'failed' && ctx.sms) { const r2 = await ctx.sms(s.live, role, text); if (r2.status !== 'failed') r = r2; }
   s.outbox.push({ at: ctx.now(), role, label, text, status: r.status, channel: r.channel, error: r.error || null });
   s.outbox = s.outbox.slice(-60);
 }
+/* The family message in the local language (Hindi, pending review) with the English text under it. */
+const familyText = (s, vars) => (s.settings.lang === 'hi' ? M.fill('family', vars, 'hi') + '\n' : '') + M.fill('family', vars);
 
 const typeOf = (s) => D0.emergencyTypes.find((x) => x.id === (s.cur && s.cur.type)) || D0.emergencyTypes[0];
 const groupOf = (s) => (s.cur && s.cur.patient ? clean(s.cur.patient.blood, 6) || 'not known yet' : D0.mother.bloodGroup);
@@ -58,7 +76,7 @@ function summaryLink(s, ctx, hospital) {
   const dest = fac(s, hospital);
   s.links[token] = { expires: ctx.now() + LINK_TTL_MS, hospital: dest.name, eta: eta(dest), ref: s.cur.id,
     type: t.label, review: t.review || '',
-    patient: { name: clean(p.name || D0.mother.name), age: clean(p.age, 4) || 'not given', blood: groupOf(s) },
+    patient: { name: clean(p.name || D0.mother.name), age: clean(p.age, 4) || 'not given', blood: groupOf(s), abha: p.abha || '' },
     needs: t.needs || '', from: D0.startPoint.name, informed: p.informed || 'Not recorded',
     facts: formFor(t.id).map((q) => ({ label: q.label, value: clean(p[q.id], 20) })) };
   return (ctx.baseUrl() || '') + '/s/' + token;
@@ -80,29 +98,33 @@ const emtText = (s, f) => {
 };
 /* The proposal always says when the hospital last checked in, and that the check-in is not a confirmation. */
 const CHECK_OLD_MS = (D0.checkinValidHours || 8) * 60 * 60 * 1000;
-function lastCheckText(f, ctx) {
+function lastCheckText(s, f, ctx) {
   const c = f.checkin;
-  if (!c || !c.at) return M.fill('lastCheckNone', { hospital: f.short });
-  if (ctx.now() - c.at > CHECK_OLD_MS) return M.fill('lastCheckOld', { time: clock(c.at), hours: D0.checkinValidHours || 8, hospital: f.short });
-  return M.fill('lastCheck', { time: clock(c.at), who: c.by || f.who, hospital: f.short });
+  if (!c || !c.at) return tr(s, 'lastCheckNone', { hospital: f.short });
+  if (ctx.now() - c.at > CHECK_OLD_MS) return tr(s, 'lastCheckOld', { time: clock(c.at), hours: D0.checkinValidHours || 8, hospital: f.short });
+  return tr(s, 'lastCheck', { time: clock(c.at), who: c.by || f.who, hospital: f.short });
 }
 const ivrText = (s, f) => M.fill('ivrScript', { type: typeOf(s).short, eta: eta(f) });
 
 async function startReferral(s, ctx, a) {
   const t = D0.emergencyTypes.find((x) => x.id === a.typeId);
   if (!t) return s;
-  if (!t.signed) { say(s, 'bot', M.T.typeNotSigned); return s; }
-  setCur(s, E.startReferral(t.id, ctx.now()));
+  if (!t.signed) {
+    say(s, 'nurse', t.label);
+    say(s, 'bot', t.draft ? tr(s, 'draftNote', { items: t.draft.join(', ') }) : tr(s, 'typeNotSigned'));
+    return s;
+  }
+  setCur(s, Object.assign(E.startReferral(t.id, ctx.now()), a.origin ? { origin: a.origin } : {}));
   s.step = 'details'; say(s, 'nurse', t.label);
-  if (t.review) say(s, 'bot', M.fill('reviewNote', { review: t.review }));
-  say(s, 'bot', M.T.details);
+  if (t.review) say(s, 'bot', tr(s, 'reviewNote', { review: t.review }));
+  say(s, 'bot', tr(s, 'details'));
   return s;
 }
 
 async function details(s, ctx, a) {
   if (!s.cur || s.step !== 'details') return s;
   const p = a.patient || {};
-  const patient = { name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), contact: clean(p.contact, 20),
+  const patient = { name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), contact: clean(p.contact, 20), abha: clean(p.abha, 17),
     informed: ['Yes', 'No'].includes(p.informed) ? p.informed : 'Not recorded' };
   const form = formFor(s.cur.type);
   form.forEach((q) => { patient[q.id] = clean(p[q.id], 20); });
@@ -111,10 +133,11 @@ async function details(s, ctx, a) {
   const key = form.slice(0, 2).filter((q) => patient[q.id]).map((q) => q.label + ' ' + patient[q.id]).join(', ');
   say(s, 'nurse', `Details sent: ${who}.${key ? ' ' + key + '.' : ''} Family informed: ${patient.informed}`);
   addEvent(s, ctx, 'Details sent. Family informed that details go to the hospital: ' + patient.informed);
-  const r = E.propose(s.cur, s.facilities, CFG, ctx.now());
+  const r = E.propose(s.cur, s.facilities, C(s), ctx.now());
   setCur(s, r);
+  if (r.state !== 'fallback') await supplyIdea(s, ctx);
   if (r.state === 'fallback') await goFallback(s, ctx);
-  else { const h = fac(s, r.proposal); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(h, ctx)); s.step = 'proposed'; }
+  else { const h = fac(s, r.proposal); say(s, 'bot', tr(s, 'proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(s, h, ctx)); s.step = 'proposed'; }
   return s;
 }
 
@@ -122,7 +145,7 @@ async function details(s, ctx, a) {
    the doctor, blood bank and family are told only after that. */
 async function goFallback(s, ctx) {
   const mc = fac(s, 'mc');
-  say(s, 'bot', M.T.fallback); say(s, 'bot', M.fill('fallbackWait', { hospital: mc.short })); s.step = 'waiting';
+  say(s, 'bot', tr(s, 'fallback')); say(s, 'bot', tr(s, 'fallbackWait', { hospital: mc.short })); s.step = 'waiting';
   await tell(s, ctx, 'district', 'District officer', M.fill('district', { id: s.cur.id }));
   await tell(s, ctx, 'driver', '108 driver', M.fill('driverFallback', { hospital: mc.short, km: mc.km }));
   await tell(s, ctx, 'emt', '108 EMT', M.fill('driverFallback', { hospital: mc.short, km: mc.km }));
@@ -131,28 +154,58 @@ async function goFallback(s, ctx) {
 
 async function change(s, ctx) {
   if (!s.cur || s.cur.state !== 'routed') return s;
-  const r = E.changeProposal(s.cur, s.facilities, CFG, ctx.now());
+  const r = E.changeProposal(s.cur, s.facilities, C(s), ctx.now());
   setCur(s, r); const h = fac(s, r.proposal);
-  say(s, 'nurse', 'CHANGE'); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(h, ctx));
+  say(s, 'nurse', 'CHANGE'); say(s, 'bot', tr(s, 'proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(s, h, ctx));
   return s;
 }
 
-async function send(s, ctx) {
+async function send(s, ctx, a) {
   if (!s.cur || s.cur.state !== 'routed') return s;
-  const r = E.sendTo(s.cur, ctx.now());
-  setCur(s, r); s.step = 'waiting'; say(s, 'nurse', 'SEND'); say(s, 'bot', M.T.sent);
+  const backup = s.settings.parallel ? E.pickBackup(s.cur, s.facilities, C(s)) : null;
+  const r = E.sendTo(s.cur, ctx.now(), backup);
+  setCur(s, r); s.step = 'waiting'; if (!(a && a.quiet)) say(s, 'nurse', 'SEND'); say(s, 'bot', tr(s, 'sent'));
   const h = fac(s, r.proposal);
-  await tell(s, ctx, 'driver', '108 driver', M.fill('driver', { from: D0.startPoint.name, hospital: h.short, km: h.km }));
+  const o = r.origin;
+  await tell(s, ctx, 'driver', '108 driver', o ? M.fill('driverHome', { place: o.name, hospital: h.short, km: h.km }) : M.fill('driver', { from: D0.startPoint.name, hospital: h.short, km: h.km }));
   await tell(s, ctx, 'emt', '108 EMT', emtText(s, h));
   await tell(s, ctx, r.proposal, h.short, incomingText(s, h));
+  if (r.backup) await askBackup(s, ctx, r);
   return s;
 }
 
-async function afterEngine(s, ctx, prev, r, minutes) {
+/* Ask the next ready hospital at the same moment. The nearer one keeps priority; the backup is cancelled if it confirms. */
+async function askBackup(s, ctx, r) {
+  const b = fac(s, r.backup), h = fac(s, r.proposal);
+  say(s, 'bot', tr(s, 'parallelNurse', { backup: b.short, hospital: h.short }));
+  await tell(s, ctx, b.id, b.short, incomingText(s, b) + ' ' + M.fill('parallelIncoming', { primary: h.short }));
+}
+
+/* Idea: inter-hospital supply. OFF by default. Advisory to the district only; routing never changes because of it. */
+async function supplyIdea(s, ctx) {
+  const c = s.cur;
+  if (!s.settings.supply || !c || c.supplyIdea || !c.proposal) return;
+  const dest = fac(s, c.proposal);
+  const group = c.patient && c.patient.blood;
+  const movable = D0.movableItems || [];
+  const near = s.facilities.filter((f) => f.kind === 'hospital' && f.id !== dest.id && !f.full && f.km < dest.km)
+    .map((f) => ({ f, miss: E.missingFor(f, C(s), c.type, group) }))
+    .filter((x) => x.miss && x.miss.length && x.miss.every((m) => movable.includes(m)))
+    .sort((a, b) => a.f.km - b.f.km)[0];
+  if (!near) return;
+  const labels = near.miss.map((m) => (ALL_ITEMS.find((it) => it.id === m) || { label: m }).label.split(/[,:(]/)[0].trim().toLowerCase());
+  setCur(s, Object.assign({}, s.cur, { supplyIdea: near.f.id }));
+  addEvent(s, ctx, 'Supply idea sent to the district (advisory only): ' + near.f.short + ' lacks only ' + labels.join(', '));
+  await tell(s, ctx, 'district', 'District officer', M.fill('supplyIdea', { hospital: near.f.short, items: labels.join(', '), type: typeOf(s).short.toLowerCase(), from: dest.short }));
+}
+
+async function afterEngine(s, ctx, prev, r, minutes, prevBackup) {
   if (r.state === 'confirmed') {
     const h = fac(s, r.confirmed || prev);
+    if (minutes == null && r.readyIn) minutes = r.readyIn;
+    if (r.cancelled && fac(s, r.cancelled)) { const x = fac(s, r.cancelled); await tell(s, ctx, x.id, x.short, M.fill('cancelled', { id: r.id, hospital: h.short })); }
     const arrive = clock(ctx.now() + (minutes ? minutes : 0) * 60000 + eta(h) * 60000);
-    say(s, 'bot', minutes ? M.fill('readyIn', { hospital: h.short, min: minutes, time: arrive }) : M.fill('ready', { hospital: h.short, time: arrive }));
+    say(s, 'bot', minutes ? tr(s, 'readyIn', { hospital: h.short, min: minutes, time: arrive }) : tr(s, 'ready', { hospital: h.short, time: arrive }));
     s.step = 'close';
     await tell(s, ctx, 'nurse', 'Nurse', minutes ? M.fill('readyIn', { hospital: h.short, min: minutes, time: arrive }) : M.fill('ready', { hospital: h.short, time: arrive }));
     await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, h.id));
@@ -166,15 +219,19 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     await tell(s, ctx, h.id, h.short, M.T.hospAfter);
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverOk', { hospital: h.short }));
     await tell(s, ctx, 'emt', '108 EMT', M.fill('emtOk', { hospital: h.short }));
-    await tell(s, ctx, 'family', 'Family', M.fill('family', { hospital: h.short, eta: eta(h) }));
+    await tell(s, ctx, 'family', 'Family', familyText(s, { hospital: h.short, eta: eta(h) }));
   } else if (r.state === 'fallback') {
     await goFallback(s, ctx);
   } else if (r.state === 'sent' && r.proposal !== prev) {
     const h = fac(s, r.proposal);
-    say(s, 'bot', M.fill('reroute', { hospital: h.short })); say(s, 'bot', lastCheckText(h, ctx)); s.step = 'waiting';
+    const wasBackup = prevBackup && r.proposal === prevBackup;
+    if (wasBackup) say(s, 'bot', tr(s, 'rerouteBackup', { hospital: fac(s, prev).short, backup: h.short }));
+    else say(s, 'bot', tr(s, 'reroute', { hospital: h.short }));
+    say(s, 'bot', lastCheckText(s, h, ctx)); s.step = 'waiting';
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: h.short, km: h.km }));
     await tell(s, ctx, 'emt', '108 EMT', M.fill('driverChange', { hospital: h.short, km: h.km }));
-    await tell(s, ctx, h.id, h.short, incomingText(s, h));
+    await tell(s, ctx, h.id, h.short, wasBackup ? M.fill('nowFirst', { id: r.id }) : incomingText(s, h));
+    if (r.backup && r.backup !== prevBackup) await askBackup(s, ctx, r);
   }
 }
 
@@ -183,35 +240,42 @@ async function hospitalReply(s, ctx, a) {
   if (!c || !['sent', 'ivr', 'routed', 'fallback'].includes(c.state)) return s;
   const kind = a.kind === 'ready-in' ? 'ready-in' : a.kind === 'not-available' ? 'not-available' : 'all-ready';
   const minutes = kind === 'ready-in' ? Math.min(240, Math.max(1, Math.round(Number(a.minutes) || 15))) : null;
-  const prev = c.proposal;
-  const r = E.onHospitalReply(c, prev, kind === 'ready-in' ? { kind, minutes } : { kind }, s.facilities, CFG, ctx.now());
+  const prev = c.proposal, prevBackup = c.backup;
+  const fid = a.facility && [c.proposal, c.backup].includes(String(a.facility)) ? String(a.facility) : prev;
+  const r = E.onHospitalReply(c, fid, kind === 'ready-in' ? { kind, minutes } : { kind }, s.facilities, C(s), ctx.now());
   if (r === c) return s;
-  setCur(s, r); s.ivrAt = null;
+  setCur(s, r);
+  if (fid !== prev) { // the hospital asked in parallel answered; the nearer one still has priority
+    const b = fac(s, fid), h = fac(s, prev);
+    say(s, 'bot', r.backupYes ? tr(s, 'backupYesNurse', { backup: b.short, hospital: h.short }) : tr(s, 'backupNoNurse', { backup: b.short }));
+    return s;
+  }
+  s.ivrAt = null;
   if (c.state === 'fallback' && r.state === 'fallback') {
     if (r.fallbackDeclined && !c.fallbackDeclined) {
       const h = fac(s, prev);
-      say(s, 'bot', M.fill('fallbackDeclined', { hospital: h.short, id: r.id }));
+      say(s, 'bot', tr(s, 'fallbackDeclined', { hospital: h.short, id: r.id }));
       await tell(s, ctx, 'district', 'District officer', M.fill('fallbackDeclined', { hospital: h.short, id: r.id }));
     }
     return s;
   }
-  await afterEngine(s, ctx, prev, r, minutes);
+  await afterEngine(s, ctx, prev, r, minutes, prevBackup);
   return s;
 }
 
 async function ivrAnswer(s, ctx, a) {
   if (!s.cur || s.cur.state !== 'ivr') return s;
-  const prev = s.cur.proposal;
-  const r = E.onIVR(s.cur, a.answer === '1' ? '1' : 'none', s.facilities, CFG, ctx.now());
+  const prev = s.cur.proposal, prevBackup = s.cur.backup;
+  const r = E.onIVR(s.cur, a.answer === '1' ? '1' : 'none', s.facilities, C(s), ctx.now());
   setCur(s, r); s.ivrAt = null;
-  say(s, 'bot', r.state === 'confirmed' ? `IVR: all ready. ${fac(s, prev).short} confirmed.` : 'IVR not answered.');
-  await afterEngine(s, ctx, prev, r, null);
+  say(s, 'bot', r.state === 'confirmed' && r.confirmed === prev ? `IVR: all ready. ${fac(s, prev).short} confirmed.` : 'IVR not answered.');
+  await afterEngine(s, ctx, prev, r, null, prevBackup);
   return s;
 }
 
 async function skip(s) {
   if (!s.cur || s.cur.state !== 'sent') return s;
-  setCur(s, Object.assign({}, s.cur, { timerStart: s.cur.timerStart - CFG.replyWindowSec * 1000 }));
+  setCur(s, Object.assign({}, s.cur, { timerStart: s.cur.timerStart - C(s).replyWindowSec * 1000 }));
   return s;
 }
 
@@ -220,7 +284,7 @@ async function arrived(s, ctx, a) {
   const v = ['Yes', 'No', 'Transferred'].includes(a.value) ? a.value : null;
   if (!v) return s;
   if (v === 'Yes') {
-    setCur(s, Object.assign({}, s.cur, { arrived: 'Yes', arrivedAt: ctx.now() })); addEvent(s, ctx, 'Arrived at the hospital'); say(s, 'nurse', 'Yes, arrived'); say(s, 'bot', M.T.readyQ);
+    setCur(s, Object.assign({}, s.cur, { arrived: 'Yes', arrivedAt: ctx.now() })); addEvent(s, ctx, 'Arrived at the hospital'); say(s, 'nurse', 'Yes, arrived'); say(s, 'bot', tr(s, 'readyQ'));
     const h = fac(s, s.cur.confirmed || s.cur.destination);
     if (s.cur.bloodHoldUntil && h) await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('bloodIssue', { hospital: h.short, group: groupOf(s) }));
     return s;
@@ -232,16 +296,16 @@ async function arrived(s, ctx, a) {
 async function readyCheck(s, ctx, a) {
   const c = s.cur;
   if (!c || c.arrived !== 'Yes' || c.state === 'closed') return s;
-  const items = E.itemsFor(c.type, CFG);
+  const items = E.itemsFor(c.type, C(s));
   if (!c.readyOnArrival) {
     if (a.value === 'Yes') {
       setCur(s, Object.assign({}, c, { readyOnArrival: 'Yes' })); addEvent(s, ctx, 'Nurse: everything was ready on arrival');
-      say(s, 'nurse', 'Yes, all ready'); say(s, 'bot', M.T.outcomeQ); return s;
+      say(s, 'nurse', 'Yes, all ready'); say(s, 'bot', tr(s, 'outcomeQ')); return s;
     }
     if (a.value !== 'No') return s;
     setCur(s, Object.assign({}, c, { readyOnArrival: 'No' }));
     say(s, 'nurse', 'No, something was missing');
-    if (!a.missing) { say(s, 'bot', M.T.missingQ); return s; }
+    if (!a.missing) { say(s, 'bot', tr(s, 'missingQ')); return s; }
   }
   const cur2 = s.cur;
   if (cur2.readyOnArrival !== 'No' || cur2.missing) return s;
@@ -249,7 +313,7 @@ async function readyCheck(s, ctx, a) {
   if (!item) return s;
   setCur(s, Object.assign({}, cur2, { missing: item.id }));
   addEvent(s, ctx, 'Nurse: on arrival this was missing: ' + item.label);
-  say(s, 'nurse', 'Missing: ' + item.label); say(s, 'bot', M.T.outcomeQ);
+  say(s, 'nurse', 'Missing: ' + item.label); say(s, 'bot', tr(s, 'outcomeQ'));
   const h = fac(s, cur2.confirmed || cur2.destination);
   await tell(s, ctx, 'district', 'District officer', M.fill('mismatch', { hospital: h ? h.short : 'The hospital', item: item.label, id: cur2.id }));
   return s;
@@ -289,7 +353,7 @@ async function feedback(s, ctx, a) {
   if (!c || !c.dischargedAt || c.feedback || !value) return s;
   const h = fac(s, c.confirmed || c.destination);
   setCur(s, Object.assign({}, c, { feedback: value })); addEvent(s, ctx, `Feedback from ${h.short}: ${value}`);
-  say(s, 'bot', M.fill('feedback', { hospital: h.short, id: c.id, value }));
+  say(s, 'bot', tr(s, 'feedback', { hospital: h.short, id: c.id, value }));
   return s;
 }
 
@@ -345,7 +409,7 @@ async function drillReport(s, ctx) {
 async function missedCall(s, ctx) {
   if (s.cur && s.step !== 'done') return s;
   if (s.step === 'done') await reset(s, ctx, {});
-  say(s, 'nurse', M.T.missedCall); say(s, 'bot', M.T.callback);
+  say(s, 'nurse', M.T.missedCall); say(s, 'bot', tr(s, 'callback'));
   s.step = 'callback';
   return s;
 }
@@ -356,7 +420,7 @@ async function nurseCall(s, ctx, a) {
   say(s, 'nurse', 'Pressed ' + a.digit);
   await startReferral(s, ctx, { typeId });
   addEvent(s, ctx, 'Started by missed call and keypad (no internet)');
-  say(s, 'bot', M.fill('callbackDone', { type: typeOf(s).short }));
+  say(s, 'bot', tr(s, 'callbackDone', { type: typeOf(s).short }));
   await details(s, ctx, { patient: { name: 'Name to follow', informed: 'Not recorded' } });
   return s;
 }
@@ -382,7 +446,7 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
   setCur(s, r); s.step = 'done';
   if (!(arrivedV === 'Yes' && outcomeV)) say(s, 'nurse', arrivedV === 'Yes' ? 'Yes, arrived' : arrivedV);
   if (outcomeV) say(s, 'nurse', 'Outcome: ' + outcomeV);
-  say(s, 'bot', M.T.closed);
+  say(s, 'bot', tr(s, 'closed'));
   const name = clean((r.patient || D0.mother).name);
   await tell(s, ctx, 'asha', 'PHC and ASHA', M.fill('asha', { name }));
   if (r.bloodHoldUntil && arrivedV !== 'Yes') {
@@ -395,6 +459,9 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
 
 async function reset(s, ctx, a) {
   const fresh = blank(s.id, s.live, a.scenario || s.scenario, ctx.now());
+  fresh.settings = Object.assign({}, s.settings || DEFAULTS); fresh.added = (s.added || []).slice();
+  fresh.roleTokens = s.roleTokens || {}; fresh.otps = {};
+  fresh.facilities = seedFacilities(fresh.scenario, ctx.now(), fresh.added);
   // Summary links already sent to a doctor keep working until they expire, even after Reset.
   const links = {};
   Object.keys(s.links || {}).forEach((k) => { if (s.links[k].expires > ctx.now()) links[k] = s.links[k]; });
@@ -405,14 +472,21 @@ async function reset(s, ctx, a) {
 
 /* Called every second for sessions waiting on a hospital. */
 async function tick(s, ctx) {
+  ensure(s);
   const c = s.cur;
   if (!c) return s;
   if (c.state === 'sent') {
-    const r = E.onTimeout(c, ctx.now(), CFG);
+    const r = E.onTimeout(c, ctx.now(), C(s), s.facilities);
+    if (r.state === 'confirmed') { // silent nearer hospital, but the backup already said yes
+      setCur(s, r);
+      say(s, 'bot', tr(s, 'silent', { hospital: fac(s, c.proposal).short }).split('.')[0] + '.');
+      await afterEngine(s, ctx, c.proposal, r, null, c.backup);
+      return s;
+    }
     if (r.state === 'ivr') {
       setCur(s, r); s.ivrAt = ctx.now();
       const h = fac(s, r.proposal);
-      say(s, 'bot', M.fill('silent', { hospital: h.short }));
+      say(s, 'bot', tr(s, 'silent', { hospital: h.short }));
       const script = ivrText(s, h);
       const call = await ctx.call(s.live, r.proposal, r.id, script);
       s.outbox.push({ at: ctx.now(), role: r.proposal, label: 'No-reply call to ' + h.short, text: script, status: call.status, channel: call.channel || 'voice', error: call.error || null });
@@ -432,7 +506,7 @@ async function nurseText(s, ctx, a) {
   if (GREETING.test(text) && (s.step === 'done' || !s.cur)) {
     if (s.step === 'callback') s.step = 'start';
     if (s.step === 'done') await reset(s, ctx, {});
-    say(s, 'nurse', text); say(s, 'bot', M.T.hello);
+    say(s, 'nurse', text); say(s, 'bot', tr(s, 'hello'));
     return s;
   }
   const quick = text.match(QUICK);
@@ -442,7 +516,7 @@ async function nurseText(s, ctx, a) {
     const group = quick[2] ? quick[2].replace(/\s+/g, '').toUpperCase().replace('POS', '+').replace('NEG', '-') : '';
     say(s, 'nurse', text);
     await startReferral(s, ctx, { typeId, quiet: true });
-    say(s, 'bot', M.fill('quick', { type: typeOf(s).short, group: group || 'not given' }));
+    say(s, 'bot', tr(s, 'quick', { type: typeOf(s).short, group: group || 'not given' }));
     await details(s, ctx, { patient: { name: 'Name to follow', blood: group, informed: 'Not recorded' }, quiet: true });
     return s;
   }
@@ -451,7 +525,7 @@ async function nurseText(s, ctx, a) {
   if (s.step === 'proposed' && /^change$/i.test(text)) return change(s, ctx);
   if (s.step === 'close' && /^[1-9]$/.test(text)) return closeDigit(s, ctx, text);
   say(s, 'nurse', text);
-  say(s, 'bot', s.cur ? M.T.busy : M.T.sayHi);
+  say(s, 'bot', s.cur ? tr(s, 'busy') : tr(s, 'sayHi'));
   return s;
 }
 
@@ -464,7 +538,7 @@ async function closeDigit(s, ctx, text) {
   const d = text.trim()[0];
   if (!c.arrived) { const v = { 1: 'Yes', 2: 'No', 3: 'Transferred' }[d]; if (v) return arrived(s, ctx, { value: v }); }
   else if (!c.readyOnArrival) { const v = { 1: 'Yes', 2: 'No' }[d]; if (v) return readyCheck(s, ctx, { value: v }); }
-  else if (c.readyOnArrival === 'No' && !c.missing) { const it = E.itemsFor(c.type, CFG)[Number(d) - 1]; if (it) return readyCheck(s, ctx, { missing: it.id }); }
+  else if (c.readyOnArrival === 'No' && !c.missing) { const it = E.itemsFor(c.type, C(s))[Number(d) - 1]; if (it) return readyCheck(s, ctx, { missing: it.id }); }
   else { const v = { 1: 'Delivered', 2: 'Other' }[d]; if (v) return outcome(s, ctx, { value: v }); }
   return s;
 }
@@ -475,7 +549,7 @@ function closePrompt(s) {
   if (!c || s.step !== 'close') return s.step === 'done' ? M.T.closed : null;
   if (!c.arrived) return M.T.closeQ;
   if (!c.readyOnArrival) return M.T.readyQ;
-  if (c.readyOnArrival === 'No' && !c.missing) return M.T.missingQ + ' ' + E.itemsFor(c.type, CFG).map((it, i) => `${i + 1} ${it.label}`).join('. ');
+  if (c.readyOnArrival === 'No' && !c.missing) return M.T.missingQ + ' ' + E.itemsFor(c.type, C(s)).map((it, i) => `${i + 1} ${it.label}`).join('. ');
   return M.T.outcomeQ;
 }
 
@@ -489,13 +563,87 @@ async function checkin(s, ctx, a) {
   const given = a.items || {};
   const items = {};
   ALL_ITEMS.forEach((it) => { if (given[it.id] === true || given[it.id] === false) items[it.id] = given[it.id]; });
-  f.checkin = { shift: 'night', items, at: ctx.now(), by: f.who };
+  const nurses = a.nurses == null || a.nurses === '' ? null : Math.max(0, Math.min(30, Math.round(Number(a.nurses) || 0)));
+  f.checkin = { shift: 'night', items, at: ctx.now(), by: f.who, nurses };
   f.missed = false;
+  if (a.bloodStock && typeof a.bloodStock === 'object') f.bloodStock = cleanStock(a.bloodStock);
   const yes = ALL_ITEMS.filter((it) => items[it.id] === true).length;
   const unknown = ALL_ITEMS.filter((it) => items[it.id] !== true && items[it.id] !== false).length;
-  const readyFor = ROUTED_TYPES.filter((t) => E.facilityStatus(f, CFG, t.id) === 'ready').map((t) => t.short);
+  const readyFor = ROUTED_TYPES.filter((t) => E.facilityStatus(f, C(s), t.id) === 'ready').map((t) => t.short);
   await tell(s, ctx, f.id, f.short, M.fill('checkinSaved', { hospital: f.short, who: f.who, yes, no: ALL_ITEMS.length - yes - unknown,
     missing: unknown ? ', ' + unknown + ' not answered (counted as not ready)' : '', readyFor: readyFor.length ? readyFor.join(', ') : 'none' }));
+  if (nurses != null && nurses < (D0.minNurses || 2)) await tell(s, ctx, 'district', 'District officer', M.fill('staffGap', { hospital: f.short, n: nurses, min: D0.minNurses || 2, who: f.who }));
+  return s;
+}
+
+const cleanStock = (o) => {
+  const out = {};
+  (D0.bloodGroups || []).forEach((g) => { const n = Math.round(Number(o[g])); if (n > 0) out[g] = Math.min(99, n); });
+  return out;
+};
+
+/* Mock of an e-RaktKosh link: fills the blood stock per group from demo data. Not connected to the real e-RaktKosh. */
+async function eraktSync(s, ctx, a) {
+  const f = fac(s, String(a.facility || ''));
+  const base = f && D0.facilities.find((x) => x.id === f.id);
+  if (!f) return s;
+  f.bloodStock = Object.assign({}, (base && base.bloodStock) || {}); f.bloodSyncedAt = ctx.now();
+  const list = Object.keys(f.bloodStock).map((g) => g + ' ' + f.bloodStock[g]).join(', ') || 'no units';
+  await tell(s, ctx, f.id, f.short, `Blood stock updated from e-RaktKosh (MOCK, demo data, not the real system): ${list}.`);
+  return s;
+}
+
+/* District settings: reply window, ask 2 hospitals at once, language, supply idea, family by SMS. */
+async function setSettings(s, ctx, a) {
+  const st = s.settings;
+  if (typeof a.parallel === 'boolean') st.parallel = a.parallel;
+  if (WINDOWS.includes(Number(a.replyWindowSec))) st.replyWindowSec = Number(a.replyWindowSec);
+  if (['en', 'hi'].includes(a.lang)) st.lang = a.lang;
+  if (typeof a.supply === 'boolean') st.supply = a.supply;
+  if (typeof a.smsFamily === 'boolean') st.smsFamily = a.smsFamily;
+  return s;
+}
+
+/* Hospital editor: the district adds a hospital. It starts Uncertain (no check-in) and gets no referral until it checks in. */
+async function addHospital(s, ctx, a) {
+  const name = clean(a.name, 40);
+  const km = Math.round(Number(a.km));
+  if (!name || !(km >= 1 && km <= 150) || s.added.length >= 4 || busy(s)) return s;
+  const n = s.added.length + 1, ang = (n * 75 + 20) * Math.PI / 180;
+  const P = D0.startPoint;
+  const f = { id: 'h' + n + crypto.randomBytes(2).toString('hex'), name, short: name, km, role: 'Labour room', kind: 'hospital', who: 'Duty nurse', ini: name[0].toUpperCase(),
+    x: Math.round((P.x + Math.cos(ang) * km) * 10) / 10, y: Math.round((P.y + Math.sin(ang) * km) * 10) / 10, nurses: null, hfr: 'not linked', added: true };
+  s.added.push(f);
+  s.facilities.push(Object.assign({}, f, { checkin: null, bloodStock: {} }));
+  await tell(s, ctx, f.id, f.short, `Welcome to Matri-Kavach, ${f.short}. Please do the night shift check-in. Until then this hospital shows as Uncertain and gets no referrals.`);
+  return s;
+}
+async function removeHospital(s, ctx, a) {
+  const id = String(a.id || '');
+  if (!s.added.some((f) => f.id === id) || busy(s)) return s;
+  s.added = s.added.filter((f) => f.id !== id); s.facilities = s.facilities.filter((f) => f.id !== id);
+  return s;
+}
+
+/* ASHA home emergency: the ASHA shares the home location; distances are counted from the home and the ambulance is sent at once. */
+async function ashaHome(s, ctx, a) {
+  const v = (D0.villages || []).find((x) => x.id === a.village);
+  const t = D0.emergencyTypes.find((x) => x.id === a.typeId && x.signed);
+  if (!v || !t || (s.cur && s.step !== 'done')) return s;
+  if (s.step === 'done') await reset(s, ctx, {});
+  s.facilities.forEach((f) => { if (f.x != null) f.km = Math.max(1, Math.round(Math.hypot(f.x - v.x, f.y - v.y))); });
+  const origin = { id: v.id, name: v.name, x: v.x, y: v.y, by: 'ASHA Sunita' };
+  await startReferral(s, ctx, { typeId: t.id, origin });
+  if (s.cur) setCur(s, Object.assign({}, s.cur, { events: [{ at: ctx.now(), text: 'Referral started by ASHA Sunita (home emergency)' }] }));
+  const text = tr(s, 'ashaStart', { asha: 'Sunita', type: t.short, place: v.name });
+  say(s, 'bot', text); addEvent(s, ctx, 'Location shared: ' + v.name);
+  await tell(s, ctx, 'asha', 'PHC and ASHA', text);
+  await details(s, ctx, { patient: { name: 'Name to follow', blood: clean(a.blood, 6), informed: 'Not recorded' } });
+  if (s.cur.state === 'routed') {
+    await send(s, ctx, { quiet: true });
+    const h = fac(s, s.cur.proposal);
+    await tell(s, ctx, 'asha', 'PHC and ASHA', tr(s, 'ashaSent', { place: v.name, hospital: h.short, eta: eta(h) }));
+  }
   return s;
 }
 
@@ -510,14 +658,80 @@ async function missCheckin(s, ctx, a) {
 }
 
 const RAW = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport,
-  feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall };
+  feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall, eraktSync, setSettings, addHospital, removeHospital, ashaHome };
 /* Every action first lifts any "full" flag whose 2 hours have passed. */
 const ACTIONS = {};
-Object.keys(RAW).forEach((k) => { ACTIONS[k] = (s, ctx, a) => { expireFull(s, ctx); return RAW[k](s, ctx, a || {}); }; });
+Object.keys(RAW).forEach((k) => { ACTIONS[k] = (s, ctx, a) => { ensure(s); expireFull(s, ctx); return RAW[k](s, ctx, a || {}); }; });
 
 function publicView(s, now) {
+  ensure(s);
   return { id: s.id, live: s.live, scenario: s.scenario, facilities: s.facilities, refs: s.refs, cur: s.cur, chat: s.chat,
-    step: s.step, outbox: s.outbox.slice(-30), drill: s.drill || null, serverTime: now, replyWindowSec: CFG.replyWindowSec };
+    step: s.step, outbox: s.outbox.slice(-30), drill: s.drill || null, serverTime: now, replyWindowSec: C(s).replyWindowSec,
+    settings: s.settings, role: null };
 }
 
-module.exports = { CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt };
+/* ---- Role logins (RBAC demo): phone number = role, one-time code shown on screen (no SMS in the demo) ---- */
+const HOSPITAL_ROLES = (s) => s.facilities.filter((f) => f.kind === 'hospital' || f.kind === 'fallback').map((f) => f.id);
+const OTP_MS = 5 * 60 * 1000, TOKEN_MS = 12 * 60 * 60 * 1000;
+const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+function loginStart(s, ctx, phone) {
+  ensure(s);
+  const who = (D0.roleLogins || []).find((x) => digits(x.phone) === digits(phone));
+  if (!who) return null;
+  const code = String(crypto.randomInt(100000, 1000000));
+  s.otps[who.role] = { code, exp: ctx.now() + OTP_MS, tries: 0 };
+  return { role: who.role, label: who.label, demoCode: code };
+}
+function loginVerify(s, ctx, phone, code) {
+  ensure(s);
+  const who = (D0.roleLogins || []).find((x) => digits(x.phone) === digits(phone));
+  const o = who && s.otps[who.role];
+  if (!o || o.exp < ctx.now() || o.tries >= 5) return null;
+  o.tries += 1;
+  if (String(code || '').trim() !== o.code) return null;
+  delete s.otps[who.role];
+  Object.keys(s.roleTokens).forEach((k) => { if (s.roleTokens[k].exp < ctx.now()) delete s.roleTokens[k]; });
+  const token = crypto.randomBytes(16).toString('hex');
+  s.roleTokens[token] = { role: who.role, exp: ctx.now() + TOKEN_MS };
+  return { token, role: who.role, label: who.label };
+}
+function roleOf(s, ctx, token) {
+  const t = token && s.roleTokens && s.roleTokens[token];
+  return t && t.exp > ctx.now() ? t.role : null;
+}
+/* Which role may run which action. A hospital may only answer, check in or mark full for itself. */
+const NURSE_ACTS = ['nurseText', 'startReferral', 'details', 'change', 'send', 'arrived', 'readyCheck', 'outcome', 'missedCall', 'nurseCall', 'skip', 'reset'];
+const HOSP_ACTS = ['hospitalReply', 'ivrAnswer', 'checkin', 'teamReady', 'discharge', 'feedback', 'setFull', 'drillReply', 'eraktSync'];
+const DISTRICT_ACTS = ['monthlyReport', 'drill', 'drillReport', 'setSettings', 'addHospital', 'removeHospital', 'missCheckin', 'reset'];
+function allowed(s, role, action, a) {
+  if (!role) return true; // no login: the open demo, every phone on one screen
+  if (role === 'nurse') return NURSE_ACTS.includes(action);
+  if (role === 'district') return DISTRICT_ACTS.includes(action);
+  if (role === 'asha') return action === 'ashaHome';
+  if (HOSPITAL_ROLES(s).includes(role)) {
+    if (!HOSP_ACTS.includes(action)) return false;
+    const c = s.cur;
+    if (['checkin', 'setFull', 'drillReply', 'eraktSync'].includes(action)) return String(a.facility || '') === role;
+    if (action === 'hospitalReply') return String(a.facility || (c && c.proposal) || '') === role;
+    if (action === 'ivrAnswer') return Boolean(c && c.proposal === role);
+    return Boolean(c && (c.confirmed || c.destination) === role);
+  }
+  return false; // doctor, blood bank, driver, EMT and family only read their own messages
+}
+/* What one role sees: only its own messages. People who do not treat her never get her name or the case history. */
+function roleView(view, role) {
+  if (!role) return view;
+  const clinical = role === 'nurse' || HOSPITAL_ROLES({ facilities: view.facilities }).includes(role);
+  const strip = (r) => r && { id: r.id, type: r.type, state: r.state, proposal: r.proposal, backup: r.backup, backupYes: r.backupYes, confirmed: r.confirmed,
+    destination: r.destination, timerStart: r.timerStart, fallbackDeclined: r.fallbackDeclined, arrived: r.arrived, teamReadyAt: r.teamReadyAt,
+    dischargedAt: r.dischargedAt, feedback: r.feedback, createdAt: r.createdAt, decidedAt: r.decidedAt, firstAsked: r.firstAsked, readyOnArrival: r.readyOnArrival, events: [] };
+  return Object.assign({}, view, { role,
+    chat: role === 'nurse' ? view.chat : [],
+    outbox: view.outbox.filter((o) => o.role === role),
+    cur: clinical ? view.cur : strip(view.cur),
+    refs: role === 'district' ? view.refs.map(strip) : clinical ? view.refs : [],
+    drill: view.drill });
+}
+
+module.exports = { CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+  loginStart, loginVerify, roleOf, allowed, roleView };

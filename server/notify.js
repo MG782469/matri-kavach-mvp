@@ -59,6 +59,20 @@ async function sendText(live, role, text) {
   }
 }
 
+/* Plain SMS (fallback when the family has no WhatsApp). Needs Twilio keys and TWILIO_SMS_FROM; otherwise shown on screen only. */
+async function sendSms(live, role, text) {
+  const to = phoneFor(role);
+  if (!live || !configured() || !process.env.TWILIO_SMS_FROM) return { status: 'simulated', channel: 'sms' };
+  if (!to) return { status: 'no-phone', channel: 'sms' };
+  try {
+    await twilio('Messages', { To: e164(to), From: process.env.TWILIO_SMS_FROM, Body: text });
+    return { status: 'sent', channel: 'sms' };
+  } catch (e) {
+    console.error('sms failed', role, e.message);
+    return { status: 'failed', channel: 'sms', error: e.message };
+  }
+}
+
 async function placeCall(live, role, refId) {
   const to = phoneFor(role);
   if (!live || !configured() || !to || !process.env.TWILIO_SMS_FROM) return { status: 'simulated' };
@@ -88,4 +102,4 @@ function validSignature(req) {
   return got.length === expected.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected));
 }
 
-module.exports = { phoneFor, sameNumber, roleForNumber, sendText, placeCall, validSignature, configured, baseUrl };
+module.exports = { phoneFor, sameNumber, roleForNumber, sendText, sendSms, placeCall, validSignature, configured, baseUrl };

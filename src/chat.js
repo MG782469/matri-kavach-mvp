@@ -3,6 +3,7 @@
 (function (root) {
   var MK = root.MK, D = MK.DATA, M = MK.messages;
   var SID = null, KEY = null, ST = null, OFFSET = 0, BUSY = false, LAST = '', VIEW = 'nurse', SEEN = null;
+  var TOKEN = null, ROLE = null; // role login (demo RBAC): this screen then shows only one phone
   var ECHO = {}; // replies tapped on a hospital phone in this browser, shown as sent messages
   var CK = null; // check-in being filled on a hospital phone: { facility, items }
   var ALL_ITEMS = D.checklistItems.concat(D.extraItems || []);
@@ -23,6 +24,13 @@
     { id: 'asha', label: 'PHC and ASHA', owner: 'PHC and ASHA Sunita' }
   ];
 
+  /* The fixed phones plus any hospital the district added in the hospital editor. Logged in: only that role's phone. */
+  function phones() {
+    var added = ((ST && ST.facilities) || []).filter(function (f) { return f.added; }).map(function (f) { return { id: f.id, label: f.short, owner: 'Duty phone, ' + f.short + ' (added)' }; });
+    var all = PHONES.slice(0, 5).concat(added, PHONES.slice(5));
+    return ROLE ? all.filter(function (p) { return p.id === ROLE; }) : all;
+  }
+  function phoneOf(id) { return phones().concat(PHONES).filter(function (p) { return p.id === id; })[0] || { id: id, label: id, owner: id }; }
   function $(id) { return document.getElementById(id); }
   function now() { return Date.now() + OFFSET; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -40,7 +48,7 @@
   }
   function phoneMsgs(role) {
     var list = (ST.outbox || []).filter(function (o) { return o.role === role; }).map(function (o) {
-      return { dir: 'in', text: o.text, at: o.at, call: /^No-reply call/.test(o.label || ''), incoming: /^INCOMING/.test(o.text || '') };
+      return { dir: 'in', text: o.text, at: o.at, call: /^No-reply call/.test(o.label || ''), incoming: /^INCOMING/.test(o.text || ''), sms: o.channel === 'sms', cancel: /^CANCELLED/.test(o.text || '') };
     });
     (ECHO[role] || []).forEach(function (e) { if (!ST.cur || e.ref === ST.cur.id) list.push({ dir: 'out', text: e.text, at: e.at }); });
     return list.sort(function (a, b) { return a.at - b.at; });
@@ -61,7 +69,8 @@
     if (step === 'close' && r && r.arrived === 'Yes' && !r.outcome) return { btns: [['outcome', 'Delivered', '1 Delivered'], ['outcome', 'Other', '2 Other']] };
     return null;
   }
-  function hospitalCanReply(role) { var r = cur(); return r && r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined); }
+  function isBackup(role) { var r = cur(); return Boolean(r && r.backup === role && r.proposal !== role && !r.backupYes && ['sent', 'ivr'].indexOf(r.state) !== -1); }
+  function hospitalCanReply(role) { var r = cur(); return Boolean(r && ((r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined)) || isBackup(role))); }
 
   function drillPending(role) { var d = ST.drill; return d && !d.done && d.ids.indexOf(role) !== -1 && d.replies[role] == null && !hospitalCanReply(role); }
   /* Buttons a hospital phone shows after it confirmed: team ready, discharge, feedback. Plus the drill reply. */
@@ -81,7 +90,9 @@
     var tk = m.dir === 'out' ? '<span class="tk">✓✓</span>' : '';
     var body;
     if (m.call) body = '<span class="callrec"><span class="cic">📞</span><span><b>Voice call</b><br><span class="foot2">' + esc(m.text) + '</span></span></span>';
-    else if (m.incoming) body = '<span class="hdr">🚨 Incoming referral</span>' + linkify(m.text);
+    else if (m.incoming) body = '<span class="hdr">🚨 Incoming referral' + (/BACKUP/.test(m.text) ? ' (backup)' : '') + '</span>' + linkify(m.text);
+    else if (m.cancel) body = '<span class="hdr">✖ Cancelled</span>' + linkify(m.text);
+    else if (m.sms) body = '<span class="hdr">✉ SMS</span>' + linkify(m.text);
     else body = linkify(m.text);
     return '<div class="grp ' + m.dir + '"><div class="bub">' + body + '<span class="meta">' + clock(m.at) + tk + '</span></div>' + (extra || '') + '</div>';
   }
@@ -105,7 +116,7 @@
         else if (b && b.btns && !b.extra) extra = '<div class="qr">' + b.btns.map(btnHtml).join('') + '</div>';
       }
       if (VIEW !== 'nurse' && m.incoming && i === lastIncoming && hospitalCanReply(VIEW)) {
-        extra = '<div class="qr">' + [['reply', 'all-ready', '1 All ready'], ['reply', 'ready-in', '2 Ready in 15 min'], ['reply', 'not-available', '3 Not available']].map(btnHtml).join('') + '</div>';
+        extra = '<div class="qr">' + [['reply', 'all-ready', '1 All ready'], ['reply', 'ready-in:10', '2 Ready in 10 min'], ['reply', 'ready-in:20', '2 Ready in 20 min'], ['reply', 'ready-in:30', '2 Ready in 30 min'], ['reply', 'not-available', '3 Not available']].map(btnHtml).join('') + '</div>';
       }
       html += bubble(m, extra);
     });
@@ -116,7 +127,9 @@
       var nb = nurseButtons();
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
     }
-    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call. <button data-act="skip">Skip 2 min (demo)</button></div>';
+    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call' + (r.backup ? ', unless backup ' + esc(fac(r.backup).short) + ' already said ready' : '') + '. ' + (ROLE && ROLE !== 'nurse' ? '' : '<button data-act="skip">Skip 2 min (demo)</button>') + '</div>';
+    if (r && isBackup(VIEW)) html += '<div class="sysmsg">⏱ You are the <b>backup</b>. ' + esc(fac(r.proposal).short) + ' is nearer and has priority until <b data-cd>02:00</b> runs out. Please reply now anyway.</div>';
+    if (r && r.backup && r.backupYes && VIEW === r.backup && ['sent', 'ivr'].indexOf(r.state) !== -1) html += '<div class="sysmsg">✓ Your reply is recorded as backup. Waiting for ' + esc(fac(r.proposal).short) + '.</div>';
     if (r && r.state === 'fallback' && VIEW === 'nurse') html += '<div class="sysmsg warnmsg">⚠ ' + esc(fac('mc').short) + (r.fallbackDeclined ? ' cannot confirm. The district and clinicians are deciding.' : ' is proposed only, not accepted. Waiting for it to confirm.') + '</div>';
     if (r && r.state === 'ivr' && VIEW === 'nurse') html += '<div class="sysmsg">📞 Calling ' + esc(fac(r.proposal).short) + ' duty phone now.</div>';
     el.innerHTML = html;
@@ -136,7 +149,7 @@
     var yes = ALL_ITEMS.filter(function (it) { return f.checkin.items[it.id] === true; }).length;
     var open = Object.assign({}, f, { full: false });
     var ready = D.emergencyTypes.filter(function (t) { return t.signed && MK.engine.facilityStatus(open, D, t.id) === 'ready'; }).map(function (t) { return t.short; });
-    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.checkin.by || f.who) + (f.checkin.at ? ' at ' + esc(clock(f.checkin.at)) : '') + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button>' +
+    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.checkin.by || f.who) + (f.checkin.at ? ' at ' + esc(clock(f.checkin.at)) : '') + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes' + (f.checkin.nurses != null ? ', ' + f.checkin.nurses + ' nurse' + (f.checkin.nurses === 1 ? '' : 's') + ' on duty' : '') + '. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button>' +
       (f.kind === 'hospital' && !f.full ? ' <button data-act="full" data-v="1">Full for 2 hours</button>' : '') + '</div>';
   }
 
@@ -148,16 +161,20 @@
 
   /* ---------- phone picker with unread badges ---------- */
   function renderPhones() {
-    $('phones').innerHTML = PHONES.map(function (p) {
+    $('phones').innerHTML = phones().map(function (p) {
       var unread = Math.max(0, countIn(p.id) - (SEEN[p.id] || 0));
       if (p.id === VIEW) unread = 0;
       return '<button class="ph" role="tab" data-phone="' + p.id + '" aria-selected="' + (p.id === VIEW) + '">' + esc(p.label) + (unread ? '<span class="badge">' + unread + '</span>' : '') + '</button>';
     }).join('');
-    var p = PHONES.filter(function (x) { return x.id === VIEW; })[0];
-    var others = PHONES.reduce(function (n, x) { return x.id === VIEW ? n : n + Math.max(0, countIn(x.id) - (SEEN[x.id] || 0)); }, 0);
-    $('owner').innerHTML = '\ud83d\udcf1 Phone of <b>' + esc(p.owner) + '</b> <span class="sw">Switch phone \u25be</span>' + (others ? '<span class="badge">' + others + '</span>' : '');
+    var p = phoneOf(VIEW);
+    var others = phones().reduce(function (n, x) { return x.id === VIEW ? n : n + Math.max(0, countIn(x.id) - (SEEN[x.id] || 0)); }, 0);
+    $('owner').innerHTML = ROLE ? '\ud83d\udd12 Logged in as <b>' + esc(p.owner) + '</b> <span class="sw">Log out</span>'
+      : '\ud83d\udcf1 Phone of <b>' + esc(p.owner) + '</b> <span class="sw">Switch phone \u25be</span>' + (others ? '<span class="badge">' + others + '</span>' : '');
+    $('phones').hidden = Boolean(ROLE);
     var nurseNew = VIEW === 'nurse' && (!ST.chat.length || ST.step === 'done');
-    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="BLEED B+">BLEED B+</button><button data-act="mcall">📞 Missed call</button><button data-act="auto">▶ Auto-play</button><button data-act="help">How to test</button>' : '';
+    var ashaIdle = VIEW === 'asha' && (!cur() || ST.step === 'done' || ST.step === 'start');
+    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="BLEED B+">BLEED B+</button><button data-act="mcall">📞 Missed call</button>' + (ROLE ? '' : '<button data-act="auto">▶ Auto-play</button>') + '<button data-act="help">How to test</button>'
+      : ashaIdle ? '<button data-act="home-open">🏠 Home emergency: share location</button>' : '';
   }
 
   /* ---------- side panel: what to tap next, the case, readiness ---------- */
@@ -169,6 +186,8 @@
     if (!r || step === 'start') return ['nurse', 'On the Nurse phone, tap Choose emergency. Pick heavy bleeding, or fits / eclampsia to see that readiness differs by emergency.'];
     if (step === 'details') return ['nurse', 'Tap Fill patient details. The values are filled in for you, just tap Send.'];
     if (step === 'proposed') return ['nurse', 'Matri-Kavach picked the nearest hospital that said ready this shift. Tap SEND, or CHANGE to pick the next one.'];
+    if (r.state === 'sent' && r.backup && !r.backupYes) return [r.backup, 'The ambulance is already moving. Two hospitals were asked at once: ' + fac(r.proposal).short + ' (nearer, priority) and ' + fac(r.backup).short + ' (backup). Try the backup saying yes first, then the nearer one saying no or staying silent.'];
+    if (r.state === 'sent' && r.backupYes) return [r.proposal, fac(r.backup).short + ' (backup) already said ready. ' + fac(r.proposal).short + ' still has priority: tap 1 to take her (the backup is cancelled), 3 to pass her to the backup, or Skip 2 minutes.'];
     if (r.state === 'sent') return [r.proposal, 'The ambulance is already moving. Open the ' + fac(r.proposal).short + ' phone and tap 1 All ready, or tap Skip 2 minutes to see what happens when nobody replies.'];
     if (r.state === 'ivr') return [r.proposal, fac(r.proposal).short + ' is getting an automatic call. Open its phone and press 1, or tap No answer to see the reroute.'];
     if (r.state === 'fallback' && r.fallbackDeclined) return ['district', 'The medical college could not confirm. The district officer and the clinicians decide the destination; Matri-Kavach does not decide it.'];
@@ -187,12 +206,14 @@
     var stepsDone = { start: 0, details: 1, proposed: 2, waiting: 3, close: 4, done: 6 }[ST.step] || 0;
     if (ST.step === 'close' && r && r.arrived) stepsDone = 5;
     var steps = ['Pick the emergency', 'Send patient details', 'SEND to the proposed hospital', 'Hospital confirms (or call, reroute)', 'Doctor, blood bank, family told', 'Record arrival and outcome'];
-    var html = '<div class="panel"><h2>Next</h2><p>' + esc(n[1]) + '</p>' + (n[0] !== VIEW ? '<button class="ctl" data-phone="' + n[0] + '">Open ' + esc(PHONES.filter(function (p) { return p.id === n[0]; })[0].label) + ' phone</button>' : '') + '</div>';
+    var html = ROLE ? '' : '<div class="panel"><h2>Next</h2><p>' + esc(n[1]) + '</p>' + (n[0] !== VIEW ? '<button class="ctl" data-phone="' + n[0] + '">Open ' + esc(phoneOf(n[0]).label) + ' phone</button>' : '') + '</div>';
     html += '<div class="panel"><h2>Referral steps</h2><ol class="steps">' + steps.map(function (s, i) { return '<li class="' + (i < stepsDone ? 'done' : i === stepsDone ? 'now' : '') + '">' + esc(s) + '</li>'; }).join('') + '</ol></div>';
     if (r) {
       var dest = r.destination || r.confirmed || r.proposal;
       html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state === 'fallback' ? 'escalated, medical college not yet confirmed' : r.state) + '</dd>' +
         (dest && fac(dest) ? '<dt>Hospital</dt><dd>' + esc(fac(dest).name) + '</dd>' : '') +
+        (r.backup && fac(r.backup) ? '<dt>Backup</dt><dd>' + esc(fac(r.backup).short) + (r.backupYes ? ', said ready' : ', asked at the same time') + '</dd>' : '') +
+        (r.origin ? '<dt>Pickup</dt><dd>' + esc(r.origin.name) + ' (home, ASHA)</dd>' : '') +
         (r.patient ? '<dt>Mother</dt><dd>' + esc([r.patient.name, r.patient.age, r.patient.blood].filter(Boolean).join(', ')) + '</dd>' : '') +
         (r.bloodHoldUntil ? '<dt>Blood</dt><dd>One unit held until ' + esc(clock(r.bloodHoldUntil)) + '</dd>' : '') +
         (r.feedback ? '<dt>Feedback</dt><dd>' + esc(r.feedback) + '</dd>' : '') + '</dl></div>';
@@ -201,11 +222,14 @@
         return '<li><b>' + esc(clock(e.at)) + '</b> <span class="plus">+' + mins + ' min</span><br>' + esc(e.text) + '</li>';
       }).join('') + '</ol></div>';
     }
-    html += kpiPanel();
+    html += kpiPanel() + mapPanel();
     var rows = ST.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
-      var st = MK.engine.facilityStatus(f, D, typeOf().id);
+      var st = MK.engine.facilityStatus(f, D, typeOf().id, r && r.patient && r.patient.blood);
       var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">No check-in</span>' : st === 'full' ? '<span class="pill bad">Full</span>' : '<span class="pill bad">Not ready</span>';
-      return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km' + checkTime(f) + '</dd>';
+      var g = MK.engine.normGroup(r && r.patient && r.patient.blood);
+      var extra = (f.checkin && f.checkin.nurses != null ? ' · ' + f.checkin.nurses + ' nurse' + (f.checkin.nurses === 1 ? '' : 's') : '') +
+        (g && f.bloodStock ? ' · ' + g + ': ' + (f.bloodStock[g] || 0) + ' unit' + ((f.bloodStock[g] || 0) === 1 ? '' : 's') : '');
+      return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km' + esc(extra) + checkTime(f) + (f.hfr ? '<br><span class="sub2">HFR ID: ' + esc(f.hfr) + (f.added ? '' : ' (mock)') + '</span>' : '') + '</dd>';
     }).join('');
     html += '<div class="panel"><h2>Tonight’s readiness (' + esc(typeOf().short.toLowerCase()) + ')</h2><dl class="kv">' + rows + '</dl>' + (typeOf().review ? '<p class="sub2">' + esc(typeOf().review) + '</p>' : '') + '</div>';
     html += '<div class="panel"><h2>Who sees what</h2><dl class="kv">' +
@@ -219,6 +243,23 @@
     $('side').innerHTML = html;
     $('skip').hidden = !(r && r.state === 'sent');
     document.querySelectorAll('[data-scn]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scn === ST.scenario)); });
+  }
+
+  /* District map: synthetic positions on a km grid, not real places. No live ambulance tracking (108 owns GPS). */
+  function mapPanel() {
+    var r = cur(), P = (r && r.origin) || D.startPoint, W = 96, H = 70;
+    var fs = ST.facilities.filter(function (f) { return f.x != null && (f.kind === 'hospital' || f.kind === 'fallback'); });
+    var col = function (f) { var st = MK.engine.facilityStatus(f, D, typeOf().id, r && r.patient && r.patient.blood); return f.kind === 'fallback' ? 'var(--mk-fb)' : st === 'ready' ? 'var(--mk-ok)' : st === 'uncertain' ? 'var(--mk-warn)' : 'var(--mk-bad)'; };
+    var dest = r && (r.confirmed || r.proposal);
+    var line = function (id, dash) { var f = fac(id); return f && f.x != null ? '<line x1="' + P.x + '" y1="' + P.y + '" x2="' + f.x + '" y2="' + f.y + '" stroke="var(--mk-line)" stroke-width="' + (dash ? 0.6 : 1.2) + '"' + (dash ? ' stroke-dasharray="2 1.5"' : '') + '/>' : ''; };
+    var svg = '<svg class="map" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="District map, synthetic">' +
+      '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--mk-mapbg)" rx="2"/>' +
+      (dest ? line(dest, false) : '') + (r && r.backup ? line(r.backup, true) : '') +
+      fs.map(function (f) { return '<g><circle cx="' + f.x + '" cy="' + f.y + '" r="2.2" fill="' + col(f) + '"/><text x="' + (f.x + 3) + '" y="' + (f.y - 2) + '" font-size="2.8" fill="var(--mk-ink)">' + esc(f.short) + '</text></g>'; }).join('') +
+      (D.villages || []).map(function (v) { return '<g><rect x="' + (v.x - 1.2) + '" y="' + (v.y - 1.2) + '" width="2.4" height="2.4" fill="var(--mk-vil)"/><text x="' + (v.x + 2.5) + '" y="' + (v.y + 1) + '" font-size="2.8" fill="var(--mk-sub)">' + esc(v.name) + '</text></g>'; }).join('') +
+      '<g><path d="M' + P.x + ' ' + (P.y - 2.6) + ' l2.4 4.2 h-4.8 z" fill="var(--mk-phc)"/><text x="' + (P.x + 3) + '" y="' + (P.y + 1.2) + '" font-size="3.2" font-weight="700" fill="var(--mk-ink)">' + esc(r && r.origin ? r.origin.name + ' (home)' : D.startPoint.name) + '</text></g>' +
+      '</svg>';
+    return '<div class="panel"><h2>District map (synthetic)</h2>' + svg + '<p class="sub2">Green ready, red not ready, amber no check-in, blue medical college. Solid line: destination. Dashed: backup asked at the same time. Made-up positions; no live ambulance tracking.</p></div>';
   }
 
   /* When the hospital last checked in. Older than one shift = shown as old, never as confirmed. */
@@ -263,7 +304,8 @@
   function openSheet(html) { $('sheet').innerHTML = '<div class="grab"></div>' + html; $('sheet').hidden = false; $('sheet-bg').hidden = false; }
   function closeSheet() { $('sheet').hidden = true; $('sheet-bg').hidden = true; }
   function phonesSheet() {
-    openSheet('<h3>Switch phone</h3><p class="sub2">Each person chats with the same Matri-Kavach number.</p>' + PHONES.map(function (p) {
+    if (ROLE) { logoutSheet(); return; }
+    openSheet('<h3>Switch phone</h3><p class="sub2">Each person chats with the same Matri-Kavach number.</p>' + phones().map(function (p) {
       var unread = p.id === VIEW ? 0 : Math.max(0, countIn(p.id) - (SEEN[p.id] || 0));
       return '<button class="opt' + (p.id === VIEW ? ' cur' : '') + '" data-phone="' + p.id + '"><span>' + esc(p.label) + '<small>' + esc(p.owner) + '</small></span>' + (unread ? '<span class="badge">' + unread + '</span>' : '') + '</button>';
     }).join(''));
@@ -282,6 +324,9 @@
       (dr ? '<button class="opt" data-act="drill-report"><span>Send the drill result to the district now<small>Hospitals that did not reply show as no reply</small></span></button>' : '') +
       ((!r || ['closed', 'confirmed'].indexOf(r.state) !== -1) && !fac('dh').full ? '<button class="opt" data-act="full-dh"><span>Demo: DH Devgarh is full for 2 hours<small>Diversion: the next referral skips it</small></span></button>' : '') +
       '<button class="opt" data-act="report"><span>Demo: monthly readiness report to district<small>Which hospital was not ready, how often, and why</small></span></button>' +
+      (ROLE ? '' : '<button class="opt" data-act="settings"><span>⚙ District settings and hospital editor<small>Ask 2 hospitals at once, reply time, Hindi, SMS, supply idea, add a hospital</small></span></button>') +
+      (ROLE ? '' : '<button class="opt" data-act="home-open"><span>🏠 ASHA: home emergency with location<small>The mother is at home, not at the PHC</small></span></button>') +
+      '<button class="opt" data-act="' + (ROLE ? 'logout' : 'login') + '"><span>' + (ROLE ? '🔓 Log out of this role' : '🔐 Log in as one role (demo OTP)<small>Phone number = role. This screen then shows only that person’s messages</small>') + '</span></button>' +
       '<button class="opt" data-act="help"><span>How to test</span></button>' +
       '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
       '<a class="opt" href="' + esc($('classic').getAttribute('href')) + '"><span>Open the dashboard view</span></a>');
@@ -293,8 +338,60 @@
       var v = CK.items[it.id];
       return '<div class="ck"><span>' + esc(it.label) + '</span><span class="yn"><button data-act="ck" data-v="' + it.id + ':1" aria-pressed="' + (v === true) + '">Yes</button><button data-act="ck" data-v="' + it.id + ':0" aria-pressed="' + (v === false) + '">No</button></span></div>';
     }).join('');
-    openSheet('<h3>Night shift check-in</h3><p class="sub2">' + esc(f.short) + ' · ' + esc(f.who) + '. One check-in covers every emergency. Not answered = not ready.</p>' + rows + '<button class="go" data-act="ck-save">Save check-in</button>');
+    var nurses = f.checkin && f.checkin.nurses != null ? f.checkin.nurses : f.nurses;
+    var nsel = '<label class="fl">Nurses on duty tonight<select id="ck-nurses">' + [0, 1, 2, 3, 4, 5, 6, 8, 10].map(function (n) { return '<option' + (n === nurses ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label>';
+    var stock = f.bloodStock || {};
+    var bs = '<p class="sub2"><b>Blood units in stock, by group</b> (used to route a mother of that group)</p><div class="bs">' + (D.bloodGroups || []).map(function (g) { return '<label>' + esc(g) + '<input type="number" min="0" max="99" inputmode="numeric" data-bg="' + esc(g) + '" value="' + (stock[g] || 0) + '"></label>'; }).join('') + '</div>' +
+      '<button class="opt" data-act="erakt"><span>Fill from e-RaktKosh (mock)<small>Demo data. The real e-RaktKosh link needs approval and is not connected.</small></span></button>';
+    openSheet('<h3>Night shift check-in</h3><p class="sub2">' + esc(f.short) + ' · ' + esc(f.who) + '. One check-in covers every emergency. Not answered = not ready.</p>' + rows + nsel + bs + '<button class="go" data-act="ck-save">Save check-in</button>');
   }
+  function onOff(key, on, label, sub) {
+    return '<div class="ck"><span>' + esc(label) + (sub ? '<small class="sub2"><br>' + esc(sub) + '</small>' : '') + '</span><span class="yn"><button data-act="set" data-v="' + key + ':true" aria-pressed="' + on + '">On</button><button data-act="set" data-v="' + key + ':false" aria-pressed="' + !on + '">Off</button></span></div>';
+  }
+  function settingsSheet() {
+    var st = ST.settings || {}, rw = st.replyWindowSec || ST.replyWindowSec;
+    var added = ST.facilities.filter(function (f) { return f.added; });
+    var idle = !cur() || ['closed'].indexOf(cur().state) !== -1;
+    openSheet('<h3>District settings</h3><p class="sub2">For this demo session only. A real district would change these after review.</p>' +
+      onOff('parallel', st.parallel, 'Ask 2 hospitals at once', 'The nearer one has priority; the other is cancelled if it is not needed') +
+      '<div class="ck"><span>Hospital reply time</span><span class="yn">' + [60, 120, 180].map(function (n) { return '<button data-act="set" data-v="replyWindowSec:' + n + '" aria-pressed="' + (rw === n) + '">' + (n / 60) + ' min</button>'; }).join('') + '</span></div>' +
+      '<div class="ck"><span>Nurse chat language<small class="sub2"><br>Hindi texts are pending review by M Gufran. Family gets Hindi and English.</small></span><span class="yn"><button data-act="set" data-v="lang:en" aria-pressed="' + (st.lang !== 'hi') + '">English</button><button data-act="set" data-v="lang:hi" aria-pressed="' + (st.lang === 'hi') + '">हिंदी</button></span></div>' +
+      onOff('smsFamily', st.smsFamily, 'Family has no WhatsApp: send SMS', 'Plain SMS fallback. Real SMS needs a paid Twilio number') +
+      onOff('supply', st.supply, 'Supply idea (not approved)', 'OFF by default. Only advises the district when a nearer hospital lacks only movable items. Routing never changes') +
+      '<h3>Hospital editor</h3><p class="sub2">A new hospital starts with no check-in, so it gets no referral until its labour room checks in.</p>' +
+      added.map(function (f) { return '<div class="ck"><span>' + esc(f.short) + ', ' + f.km + ' km</span><span class="yn"><button data-act="h-del" data-v="' + esc(f.id) + '"' + (idle ? '' : ' disabled') + '>Remove</button></span></div>'; }).join('') +
+      (added.length < 4 ? '<div class="two"><label>Name<input id="h-name" maxlength="40" placeholder="CHC Naya"></label><label>Km from PHC<input id="h-km" type="number" min="1" max="150" inputmode="numeric" placeholder="12"></label></div><button class="opt" data-act="h-add"' + (idle ? '' : ' disabled') + '><span>Add hospital' + (idle ? '' : '<small>Finish the current referral first</small>') + '</span></button>' : '') +
+      '<button class="go" data-act="help-close">Done</button>');
+  }
+  function homeSheet() {
+    openSheet('<h3>Home emergency (ASHA)</h3><p class="sub2">The ASHA is with the mother at home. She shares the location; Matri-Kavach counts the distance from the home and sends 108 at once.</p>' +
+      [['bleeding', 'Heavy bleeding after delivery'], ['fits', 'Fits or eclampsia']].map(function (x, i) { return '<button class="opt" role="radio" data-act="pick" data-g="ht" data-v="' + x[0] + '" aria-checked="' + (i === 0) + '"><span>' + esc(x[1]) + '</span><span class="radio"></span></button>'; }).join('') +
+      '<p class="sub2"><b>Location</b> (synthetic villages on the demo map)</p>' +
+      (D.villages || []).map(function (v, i) { return '<button class="opt" role="radio" data-act="pick" data-g="hv" data-v="' + v.id + '" aria-checked="' + (i === 0) + '"><span>📍 ' + esc(v.name) + '</span><span class="radio"></span></button>'; }).join('') +
+      '<label>Blood group from the MCP card (if known)<input id="h-blood" value="B+" maxlength="6"></label><button class="go" data-act="home-go">Share location and send</button>');
+  }
+  function loginSheet() {
+    openSheet('<h3>Log in as one role (demo)</h3><p class="sub2">In a real system each person logs in on their own phone with an OTP by SMS. Here the code is shown on screen. Synthetic numbers.</p>' +
+      '<label>Phone number<select id="lg-phone">' + (D.roleLogins || []).map(function (x) { return '<option value="' + esc(x.phone) + '">' + esc(x.phone + ' · ' + x.label) + '</option>'; }).join('') + '</select></label>' +
+      '<button class="go" data-act="login-send">Send code</button><div id="lg-step"></div>');
+  }
+  function post(path, body) { return fetch(path, { method: 'POST', headers: headers(), body: JSON.stringify(Object.assign({ sid: SID }, body)) }).then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Error'); return j; }); }); }
+  function loginSend() {
+    var ph = $('lg-phone').value;
+    post('/api/login', { phone: ph }).then(function (j) {
+      $('lg-step').innerHTML = '<p class="sub2">Demo code for ' + esc(j.label) + ' (would come by SMS): <b>' + esc(j.demoCode) + '</b></p><label>Enter the code<input id="lg-code" inputmode="numeric" maxlength="6"></label><button class="go" data-act="login-verify">Log in</button>';
+    }).catch(function (e) { $('lg-step').innerHTML = '<p class="sub2">' + esc(e.message) + '</p>'; });
+  }
+  function loginVerify() {
+    var ph = $('lg-phone').value, code = $('lg-code') ? $('lg-code').value : '';
+    post('/api/verify', { phone: ph, code: code }).then(function (j) {
+      TOKEN = j.token; ROLE = j.role; try { root.sessionStorage.setItem('mk-role', JSON.stringify({ t: TOKEN, r: ROLE })); } catch (e) {}
+      closeSheet(); VIEW = ROLE; LAST = ''; poll();
+      note('Logged in as ' + j.label + '. This screen now shows only this person’s messages and buttons (role-based access).');
+    }).catch(function (e) { var el = $('lg-step'); if (el) el.insertAdjacentHTML('beforeend', '<p class="sub2">' + esc(e.message) + '</p>'); });
+  }
+  function logoutSheet() { openSheet('<h3>Log out?</h3><p class="sub2">You are logged in as one role. Log out to see every phone again.</p><button class="go" data-act="logout">Log out</button>'); }
+  function logout() { TOKEN = null; ROLE = null; try { root.sessionStorage.removeItem('mk-role'); } catch (e) {} closeSheet(); LAST = ''; VIEW = 'nurse'; poll(); note('Logged out. Every phone is shown again.'); }
   function helpSheet() {
     openSheet('<h3>How to test (2 minutes)</h3><ol class="help">' +
       '<li><b>Nurse phone:</b> type <b>Hi</b>, tap <b>Choose emergency</b>, pick <b>Heavy bleeding</b>, then <b>Fill patient details</b> and Send. The values are filled in.</li>' +
@@ -303,6 +400,8 @@
       '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li>' +
       '<li><b>Close the loop:</b> on arrival the nurse says if everything was really ready (a No alerts the district), the hospital marks discharge, and the PHC and ASHA get the back-referral. The side panel shows the case timeline.</li>' +
       '<li><b>Quick keyword:</b> type <b>BLEED B+</b> or <b>FITS O+</b> instead of Hi, like an SMS. No internet? Tap <b>📞 Missed call</b>: Matri-Kavach calls back and the nurse presses 1 or 2.</li>' +
+      '<li><b>Two hospitals at once:</b> after SEND, DH Devgarh (nearer, priority) and SDH Kheri (backup) are both asked. If DH says yes, SDH gets CANCELLED. If SDH says yes first and DH says no or stays silent, SDH is confirmed at once.</li>' +
+      '<li><b>More from the ⋮ menu:</b> district settings (Hindi, reply time, SMS, supply idea), hospital editor, ASHA home emergency with location, and log in as one role with a demo OTP.</li>' +
       '<li><b>Short on time?</b> Tap <b>▶ Auto-play</b> and watch the whole case run across every phone. The side panel shows the district KPIs against today’s 131 minutes.</li></ol>' +
       '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
   }
@@ -319,14 +418,15 @@
     var qs = form.map(function (q) { return q.options ? s('f-' + q.id, q.label, q.options, q.options[0]) : f('f-' + q.id, q.label, q.value || ''); });
     var pairs = ''; for (var i = 0; i < qs.length; i += 2) pairs += qs[i + 1] ? '<div class="two">' + qs[i] + qs[i + 1] + '</div>' : qs[i];
     openSheet('<h3>Patient details: ' + esc(t.short) + '</h3><p class="sub2">Facts only. Yes / No / Unknown, never a guess.</p>' + f('f-name', 'Name', m.name) + '<div class="two">' + f('f-age', 'Age', m.age) + f('f-blood', 'Blood group (MCP card)', m.bloodGroup) + '</div>' +
-      f('f-contact', 'Family contact', m.contact) + pairs + s('f-informed', 'Family told that details go to the hospital?', ['Yes', 'No'], 'Yes') + '<button class="go" data-act="details-send">Send</button>');
+      f('f-contact', 'Family contact', m.contact) + f('f-abha', 'ABHA number (optional; ABDM link is a mock)', '') + pairs + s('f-informed', 'Family told that details go to the hospital?', ['Yes', 'No'], 'Yes') +
+      '<button class="opt" data-act="details-clear"><span>Clear the form<small>Type your own values instead of the demo ones</small></span></button><button class="go" data-act="details-send">Send</button>');
   }
 
   /* ---------- server ---------- */
-  function headers() { var h = { 'content-type': 'application/json' }; if (KEY) h['x-live-key'] = KEY; return h; }
+  function headers() { var h = { 'content-type': 'application/json' }; if (KEY) h['x-live-key'] = KEY; if (TOKEN) h['x-role-token'] = TOKEN; return h; }
   function sync(st) {
     ST = st; OFFSET = st.serverTime - Date.now();
-    if (!SEEN) { SEEN = {}; PHONES.forEach(function (p) { SEEN[p.id] = countIn(p.id); }); }
+    if (!SEEN) { SEEN = {}; phones().forEach(function (p) { SEEN[p.id] = countIn(p.id); }); }
     SEEN[VIEW] = countIn(VIEW);
     var sig = JSON.stringify([st.facilities, st.refs, st.cur, st.chat, st.step, st.scenario, st.outbox, VIEW, ECHO]);
     if (sig !== LAST) { LAST = sig; render(); }
@@ -335,13 +435,13 @@
     if (BUSY) return Promise.resolve();
     BUSY = true;
     return fetch('/api/act', { method: 'POST', headers: headers(), body: JSON.stringify({ sid: SID, action: action, args: args || {} }) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || 'Error'); sync(j); }); })
+      .then(function (r) { return r.json().then(function (j) { if (r.status === 401 && TOKEN) { logout(); throw new Error(j.error); } if (!r.ok) throw new Error(j.error || 'Error'); sync(j); }); })
       .catch(function (e) { note('Could not reach the server: ' + e.message + ' Try again.'); })
       .then(function () { BUSY = false; });
   }
   function poll() {
     if (BUSY) return;
-    fetch('/api/state?sid=' + SID, { headers: headers() }).then(function (r) { return r.json(); }).then(function (j) { if (!BUSY && j.facilities) sync(j); }).catch(function () {});
+    fetch('/api/state?sid=' + SID, { headers: headers() }).then(function (r) { if (r.status === 401 && TOKEN) { logout(); return {}; } return r.json(); }).then(function (j) { if (!BUSY && j.facilities) sync(j); }).catch(function () {});
   }
   function note(text, live) { var el = $('note'); el.textContent = text; el.className = 'note' + (live ? ' live' : ''); }
   function echo(role, text) { var r = cur(); (ECHO[role] = ECHO[role] || []).push({ text: text, at: now(), ref: r && r.id }); }
@@ -397,7 +497,12 @@
       else if (a === 'open-details') detailsSheet();
       else if (a === 'checkin-open') checkinSheet(VIEW);
       else if (a === 'ck') { var kv = v.split(':'); CK.items[kv[0]] = kv[1] === '1'; b.parentNode.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); }); }
-      else if (a === 'ck-save') { var c = CK; CK = null; closeSheet(); act('checkin', { facility: c.facility, items: c.items }); }
+      else if (a === 'ck-save') {
+        var c = CK; CK = null; var stock = {};
+        document.querySelectorAll('[data-bg]').forEach(function (el) { stock[el.dataset.bg] = Number(el.value) || 0; });
+        var nn = $('ck-nurses'); closeSheet(); act('checkin', { facility: c.facility, items: c.items, nurses: nn ? Number(nn.value) : null, bloodStock: stock });
+      }
+      else if (a === 'erakt') { var fid = CK ? CK.facility : VIEW; closeSheet(); CK = null; act('eraktSync', { facility: fid }); }
       else if (a === 'miss') { closeSheet(); act('missCheckin', { facility: 'dh' }).then(function () { show('dh'); }); }
       else if (a === 'help') helpSheet();
       else if (a === 'help-close') closeSheet();
@@ -405,13 +510,32 @@
       else if (a === 'type-send') { var sel = document.querySelector('.sheet .opt[aria-checked="true"]'); closeSheet(); act('startReferral', { typeId: sel ? sel.dataset.v : 'bleeding' }); }
       else if (a === 'details-send') {
         var g = function (id) { var el = $(id); return el ? el.value : ''; };
-        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact'), informed: g('f-informed') };
+        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact'), abha: g('f-abha'), informed: g('f-informed') };
         (D.forms[typeOf().id] || D.forms.bleeding).forEach(function (q) { patient[q.id] = g('f-' + q.id); });
         closeSheet(); act('details', { patient: patient });
       }
       else if (a === 'send') act('send', {});
       else if (a === 'change') act('change', {});
-      else if (a === 'reply') { var label = { 'all-ready': '1 All ready', 'ready-in': '2 Ready in 15 min', 'not-available': '3 Not available' }[v]; echo(VIEW, label); act('hospitalReply', { kind: v, minutes: v === 'ready-in' ? 15 : null }); }
+      else if (a === 'reply') {
+        var kv2 = v.split(':'), mins = kv2[1] ? Number(kv2[1]) : null;
+        echo(VIEW, kv2[0] === 'all-ready' ? '1 All ready' : kv2[0] === 'not-available' ? '3 Not available' : '2 Ready in ' + mins + ' min');
+        act('hospitalReply', { kind: kv2[0], minutes: mins, facility: VIEW });
+      }
+      else if (a === 'details-clear') document.querySelectorAll('.sheet input').forEach(function (el) { el.value = ''; });
+      else if (a === 'settings') settingsSheet();
+      else if (a === 'set') { var p2 = v.split(':'), val = p2[1] === 'true' ? true : p2[1] === 'false' ? false : /^\d+$/.test(p2[1]) ? Number(p2[1]) : p2[1]; var o = {}; o[p2[0]] = val; act('setSettings', o).then(settingsSheet); }
+      else if (a === 'h-add') { var hn = $('h-name'), hk = $('h-km'); act('addHospital', { name: hn ? hn.value : '', km: hk ? Number(hk.value) : 0 }).then(settingsSheet); }
+      else if (a === 'h-del') act('removeHospital', { id: v }).then(settingsSheet);
+      else if (a === 'home-open') homeSheet();
+      else if (a === 'home-go') {
+        var ht = document.querySelector('.sheet [data-g="ht"][aria-checked="true"]'), hv = document.querySelector('.sheet [data-g="hv"][aria-checked="true"]'), hb = $('h-blood');
+        closeSheet(); act('ashaHome', { typeId: ht ? ht.dataset.v : 'bleeding', village: hv ? hv.dataset.v : 'kesla', blood: hb ? hb.value : '' });
+      }
+      else if (a === 'pick') document.querySelectorAll('.sheet [data-g="' + b.dataset.g + '"]').forEach(function (o) { o.setAttribute('aria-checked', String(o === b)); });
+      else if (a === 'login') loginSheet();
+      else if (a === 'login-send') loginSend();
+      else if (a === 'login-verify') loginVerify();
+      else if (a === 'logout') logout();
       else if (a === 'ivr') { echo(VIEW, v === '1' ? 'Answered the call and pressed 1: all ready' : 'Did not answer the call'); act('ivrAnswer', { answer: v }); }
       else if (a === 'arrived') act('arrived', { value: v });
       else if (a === 'ready') act('readyCheck', { value: v });
@@ -442,9 +566,9 @@
       var m = text.match(/^\s*([123])\D*(\d+)?/);
       if (m) {
         echo(VIEW, text);
-        if (m[1] === '1') act('hospitalReply', { kind: 'all-ready' });
-        else if (m[1] === '3') act('hospitalReply', { kind: 'not-available' });
-        else act('hospitalReply', { kind: 'ready-in', minutes: Number(m[2]) || 15 });
+        if (m[1] === '1') act('hospitalReply', { kind: 'all-ready', facility: VIEW });
+        else if (m[1] === '3') act('hospitalReply', { kind: 'not-available', facility: VIEW });
+        else act('hospitalReply', { kind: 'ready-in', minutes: Number(m[2]) || 15, facility: VIEW });
         return;
       }
     }
@@ -475,7 +599,8 @@
       try { SID = root.localStorage.getItem('mk-sid'); } catch (e) { SID = null; }
       if (!SID || !/^[a-f0-9]{16}$/.test(SID)) { SID = randomHex(16); try { root.localStorage.setItem('mk-sid', SID); } catch (e) {} }
     }
-    try { var v = root.localStorage.getItem('mk-chat-view'); if (v && PHONES.some(function (p) { return p.id === v; })) VIEW = v; } catch (e) {}
+    try { var v = root.localStorage.getItem('mk-chat-view'); if (v) VIEW = v; } catch (e) {}
+    try { var lg = JSON.parse(root.sessionStorage.getItem('mk-role') || 'null'); if (lg && lg.t && !KEY) { TOKEN = lg.t; ROLE = lg.r; VIEW = ROLE; } } catch (e) {}
     if (q.get('phone') && PHONES.some(function (p) { return p.id === q.get('phone'); })) VIEW = q.get('phone');
     bind(); bindComposer();
     fetch('/api/state?sid=' + SID, { headers: headers() })

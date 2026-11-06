@@ -4,19 +4,22 @@
   --in: #ffffff; --out: #d9fdd3; --tick: #53bdeb; --btn-ink: #027eb5; --sys: #ffeecd; --sys-ink: #54656f;
   --chip: #ffffff; --chip-on: #d9fdd3; --chip-on-ink: #005c4b; --green: #00a884; --card: #ffffff;
   --sheet: #ffffff; --input: #ffffff; --link: #027eb5;
+  --mk-ok: #1f9d55; --mk-bad: #d64545; --mk-warn: #d9a400; --mk-fb: #2f6fdb; --mk-line: #027eb5; --mk-mapbg: #f4f7f5; --mk-ink: #111b21; --mk-sub: #667781; --mk-vil: #8a6d3b; --mk-phc: #6b3fa0;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --page: #0c1317; --ink: #e9edef; --ink2: #aebac1; --muted: #8696a0; --line: #2a3942;
   --wa-head: #202c33; --wa-head-ink: #e9edef; --wa-bg: #0b141a; --wa-dot: rgba(255,255,255,.03);
   --in: #202c33; --out: #005c4b; --tick: #53bdeb; --btn-ink: #53bdeb; --sys: #182229; --sys-ink: #8696a0;
   --chip: #202c33; --chip-on: #005c4b; --chip-on-ink: #e9edef; --green: #00a884; --card: #111b21;
-  --sheet: #111b21; --input: #2a3942; --link: #53bdeb; color-scheme: dark } }
+  --sheet: #111b21; --input: #2a3942; --link: #53bdeb; color-scheme: dark;
+  --mk-ok: #3ccf7f; --mk-bad: #ff6b6b; --mk-warn: #f0c43a; --mk-fb: #6aa1ff; --mk-line: #53bdeb; --mk-mapbg: #17232b; --mk-ink: #e9edef; --mk-sub: #8696a0; --mk-vil: #d2b27a; --mk-phc: #c39bf0 } }
 :root[data-theme="dark"] {
   --page: #0c1317; --ink: #e9edef; --ink2: #aebac1; --muted: #8696a0; --line: #2a3942;
   --wa-head: #202c33; --wa-head-ink: #e9edef; --wa-bg: #0b141a; --wa-dot: rgba(255,255,255,.03);
   --in: #202c33; --out: #005c4b; --tick: #53bdeb; --btn-ink: #53bdeb; --sys: #182229; --sys-ink: #8696a0;
   --chip: #202c33; --chip-on: #005c4b; --chip-on-ink: #e9edef; --green: #00a884; --card: #111b21;
-  --sheet: #111b21; --input: #2a3942; --link: #53bdeb; color-scheme: dark }
+  --sheet: #111b21; --input: #2a3942; --link: #53bdeb; color-scheme: dark;
+  --mk-ok: #3ccf7f; --mk-bad: #ff6b6b; --mk-warn: #f0c43a; --mk-fb: #6aa1ff; --mk-line: #53bdeb; --mk-mapbg: #17232b; --mk-ink: #e9edef; --mk-sub: #8696a0; --mk-vil: #d2b27a; --mk-phc: #c39bf0 }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -150,3 +153,11 @@ a.opt { color: var(--ink); text-decoration: none; }
 .kl{font-size:12px;color:var(--ink2)}
 .kb{font-size:11px;color:var(--muted)}
 .autobar{position:sticky;bottom:4px;font-weight:600}
+
+/* 6 Nov round 2: map, blood stock grid, settings rows */
+.map { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--line); }
+.sheet .bs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 8px; }
+.sheet .bs input { width: 100%; }
+.sheet .fl select { width: 100%; }
+.sheet .ck small { font-size: 12px; }
+.sheet .yn button[disabled], .sheet .opt[disabled] { opacity: .5; }
