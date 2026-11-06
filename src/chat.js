@@ -61,7 +61,7 @@
     if (step === 'close' && r && r.arrived === 'Yes' && !r.outcome) return { btns: [['outcome', 'Delivered', '1 Delivered'], ['outcome', 'Other', '2 Other']] };
     return null;
   }
-  function hospitalCanReply(role) { var r = cur(); return r && r.proposal === role && ['sent', 'routed', 'ivr'].indexOf(r.state) !== -1; }
+  function hospitalCanReply(role) { var r = cur(); return r && r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined); }
 
   function drillPending(role) { var d = ST.drill; return d && !d.done && d.ids.indexOf(role) !== -1 && d.replies[role] == null && !hospitalCanReply(role); }
   /* Buttons a hospital phone shows after it confirmed: team ready, discharge, feedback. Plus the drill reply. */
@@ -117,6 +117,7 @@
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
     }
     if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call. <button data-act="skip">Skip 2 min (demo)</button></div>';
+    if (r && r.state === 'fallback' && VIEW === 'nurse') html += '<div class="sysmsg warnmsg">⚠ ' + esc(fac('mc').short) + (r.fallbackDeclined ? ' cannot confirm. The district and clinicians are deciding.' : ' is proposed only, not accepted. Waiting for it to confirm.') + '</div>';
     if (r && r.state === 'ivr' && VIEW === 'nurse') html += '<div class="sysmsg">📞 Calling ' + esc(fac(r.proposal).short) + ' duty phone now.</div>';
     el.innerHTML = html;
     if (near || BUSY) el.scrollTop = el.scrollHeight;
@@ -135,7 +136,7 @@
     var yes = ALL_ITEMS.filter(function (it) { return f.checkin.items[it.id] === true; }).length;
     var open = Object.assign({}, f, { full: false });
     var ready = D.emergencyTypes.filter(function (t) { return t.signed && MK.engine.facilityStatus(open, D, t.id) === 'ready'; }).map(function (t) { return t.short; });
-    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.who) + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button>' +
+    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.checkin.by || f.who) + (f.checkin.at ? ' at ' + esc(clock(f.checkin.at)) : '') + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button>' +
       (f.kind === 'hospital' && !f.full ? ' <button data-act="full" data-v="1">Full for 2 hours</button>' : '') + '</div>';
   }
 
@@ -170,7 +171,9 @@
     if (step === 'proposed') return ['nurse', 'Matri-Kavach picked the nearest hospital that said ready this shift. Tap SEND, or CHANGE to pick the next one.'];
     if (r.state === 'sent') return [r.proposal, 'The ambulance is already moving. Open the ' + fac(r.proposal).short + ' phone and tap 1 All ready, or tap Skip 2 minutes to see what happens when nobody replies.'];
     if (r.state === 'ivr') return [r.proposal, fac(r.proposal).short + ' is getting an automatic call. Open its phone and press 1, or tap No answer to see the reroute.'];
-    if (r.state === 'fallback' || (step === 'close' && r.districtAlert && !r.arrived)) return ['district', 'Nobody was ready, so the medical college is the destination and the district officer was alerted. Look at those phones, then close the case on the Nurse phone.'];
+    if (r.state === 'fallback' && r.fallbackDeclined) return ['district', 'The medical college could not confirm. The district officer and the clinicians decide the destination; Matri-Kavach does not decide it.'];
+    if (r.state === 'fallback') return ['mc', 'No hospital confirmed readiness, so the district was alerted and the medical college is only proposed as the tertiary fallback. Open its phone: it must reply 1 to accept, or 3 if it cannot.'];
+    if (step === 'close' && r.districtAlert && !r.arrived) return ['district', 'The medical college confirmed after the district escalation. Look at the district and doctor phones, then close the case on the Nurse phone.'];
     if (step === 'close' && !r.arrived && !r.teamReadyAt && r.state === 'confirmed') return [r.confirmed, 'Confirmed. The hospital can tap Team ready at the door. The doctor, blood bank, family, driver and EMT were told. Then record arrival on the Nurse phone.'];
     if (step === 'close' && !r.arrived) return ['doctor', 'Confirmed. The doctor, blood bank and family were told at the same moment. Look at their phones, then record arrival on the Nurse phone.'];
     if (step === 'close' && r.arrived === 'Yes' && !r.readyOnArrival) return ['nurse', 'Say whether the hospital was really ready on arrival. A No alerts the district: this is how false check-ins get caught.'];
@@ -188,7 +191,7 @@
     html += '<div class="panel"><h2>Referral steps</h2><ol class="steps">' + steps.map(function (s, i) { return '<li class="' + (i < stepsDone ? 'done' : i === stepsDone ? 'now' : '') + '">' + esc(s) + '</li>'; }).join('') + '</ol></div>';
     if (r) {
       var dest = r.destination || r.confirmed || r.proposal;
-      html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state) + '</dd>' +
+      html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state === 'fallback' ? 'escalated, medical college not yet confirmed' : r.state) + '</dd>' +
         (dest && fac(dest) ? '<dt>Hospital</dt><dd>' + esc(fac(dest).name) + '</dd>' : '') +
         (r.patient ? '<dt>Mother</dt><dd>' + esc([r.patient.name, r.patient.age, r.patient.blood].filter(Boolean).join(', ')) + '</dd>' : '') +
         (r.bloodHoldUntil ? '<dt>Blood</dt><dd>One unit held until ' + esc(clock(r.bloodHoldUntil)) + '</dd>' : '') +
@@ -202,7 +205,7 @@
     var rows = ST.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
       var st = MK.engine.facilityStatus(f, D, typeOf().id);
       var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">No check-in</span>' : st === 'full' ? '<span class="pill bad">Full</span>' : '<span class="pill bad">Not ready</span>';
-      return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km</dd>';
+      return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km' + checkTime(f) + '</dd>';
     }).join('');
     html += '<div class="panel"><h2>Tonight’s readiness (' + esc(typeOf().short.toLowerCase()) + ')</h2><dl class="kv">' + rows + '</dl>' + (typeOf().review ? '<p class="sub2">' + esc(typeOf().review) + '</p>' : '') + '</div>';
     html += '<div class="panel"><h2>Who sees what</h2><dl class="kv">' +
@@ -218,6 +221,12 @@
     document.querySelectorAll('[data-scn]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scn === ST.scenario)); });
   }
 
+  /* When the hospital last checked in. Older than one shift = shown as old, never as confirmed. */
+  function checkTime(f) {
+    if (!f.checkin || !f.checkin.at) return '';
+    var old = now() - f.checkin.at > (D.checkinValidHours || 8) * 3600000;
+    return '<br><span class="sub2">' + (old ? 'Old check-in: ' : 'Last check: ') + esc(clock(f.checkin.at)) + (old ? ', must confirm' : '') + '</span>';
+  }
   function kpiPanel() {
     var k = MK.engine.kpis(ST.refs || [], ST.facilities, D), B = D.baseline;
     function tile(label, val, unit, base) {

@@ -12,15 +12,16 @@ const FULL_MS = 2 * 60 * 60 * 1000;
 const HOLD_MIN = Number(process.env.BLOOD_HOLD_MIN) || D0.bloodHoldMin || 60;
 const SCENARIOS = ['confirms', 'silent', 'nobody'];
 
-const seedFacilities = (scenario) => D0.facilities.map((f) => {
-  const checkin = f.checkin ? { shift: f.checkin.shift, items: Object.assign({}, f.checkin.items) } : null;
+/* The demo night's check-ins are recorded at the moment the session is created (or reset), by the duty person named in the data. */
+const seedFacilities = (scenario, at) => D0.facilities.map((f) => {
+  const checkin = f.checkin ? { shift: f.checkin.shift, items: Object.assign({}, f.checkin.items), at, by: f.who } : null;
   if (f.kind === 'hospital' && scenario === 'nobody') { checkin.items.blood = false; checkin.items.anaesthetist = false; }
   return Object.assign({}, f, { checkin });
 });
 
-function blank(id, live, scenario) {
+function blank(id, live, scenario, now) {
   scenario = SCENARIOS.includes(scenario) ? scenario : 'confirms';
-  return { id, live: Boolean(live), scenario, facilities: seedFacilities(scenario), refs: [], cur: null,
+  return { id, live: Boolean(live), scenario, facilities: seedFacilities(scenario, now || Date.now()), refs: [], cur: null,
     chat: [], step: 'start', outbox: [], links: {}, ivrAt: null, updatedAt: 0 };
 }
 
@@ -77,6 +78,14 @@ const emtText = (s, f) => {
   return M.fill('emt', { type: t.short, name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), group: groupOf(s),
     facts: facts || 'not sent yet', hospital: f.short, eta: eta(f) });
 };
+/* The proposal always says when the hospital last checked in, and that the check-in is not a confirmation. */
+const CHECK_OLD_MS = (D0.checkinValidHours || 8) * 60 * 60 * 1000;
+function lastCheckText(f, ctx) {
+  const c = f.checkin;
+  if (!c || !c.at) return M.fill('lastCheckNone', { hospital: f.short });
+  if (ctx.now() - c.at > CHECK_OLD_MS) return M.fill('lastCheckOld', { time: clock(c.at), hours: D0.checkinValidHours || 8, hospital: f.short });
+  return M.fill('lastCheck', { time: clock(c.at), who: c.by || f.who, hospital: f.short });
+}
 const ivrText = (s, f) => M.fill('ivrScript', { type: typeOf(s).short, eta: eta(f) });
 
 async function startReferral(s, ctx, a) {
@@ -105,25 +114,26 @@ async function details(s, ctx, a) {
   const r = E.propose(s.cur, s.facilities, CFG, ctx.now());
   setCur(s, r);
   if (r.state === 'fallback') await goFallback(s, ctx);
-  else { const h = fac(s, r.proposal); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) })); s.step = 'proposed'; }
+  else { const h = fac(s, r.proposal); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(h, ctx)); s.step = 'proposed'; }
   return s;
 }
 
+/* Nobody confirmed: escalate to the district and PROPOSE the medical college. It is not accepted until it replies;
+   the doctor, blood bank and family are told only after that. */
 async function goFallback(s, ctx) {
   const mc = fac(s, 'mc');
-  say(s, 'bot', M.T.fallback); s.step = 'close';
-  await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: mc.short, km: mc.km }));
-  await tell(s, ctx, 'emt', '108 EMT', M.fill('driverChange', { hospital: mc.short, km: mc.km }));
-  await tell(s, ctx, 'mc', 'Medical college', incomingText(s, mc));
+  say(s, 'bot', M.T.fallback); say(s, 'bot', M.fill('fallbackWait', { hospital: mc.short })); s.step = 'waiting';
   await tell(s, ctx, 'district', 'District officer', M.fill('district', { id: s.cur.id }));
-  await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, 'mc'));
+  await tell(s, ctx, 'driver', '108 driver', M.fill('driverFallback', { hospital: mc.short, km: mc.km }));
+  await tell(s, ctx, 'emt', '108 EMT', M.fill('driverFallback', { hospital: mc.short, km: mc.km }));
+  await tell(s, ctx, 'mc', mc.short, incomingText(s, mc) + ' ' + M.T.fallbackIncoming);
 }
 
 async function change(s, ctx) {
   if (!s.cur || s.cur.state !== 'routed') return s;
   const r = E.changeProposal(s.cur, s.facilities, CFG, ctx.now());
   setCur(s, r); const h = fac(s, r.proposal);
-  say(s, 'nurse', 'CHANGE'); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) }));
+  say(s, 'nurse', 'CHANGE'); say(s, 'bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: eta(h) })); say(s, 'bot', lastCheckText(h, ctx));
   return s;
 }
 
@@ -161,7 +171,7 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     await goFallback(s, ctx);
   } else if (r.state === 'sent' && r.proposal !== prev) {
     const h = fac(s, r.proposal);
-    say(s, 'bot', M.fill('reroute', { hospital: h.short })); s.step = 'waiting';
+    say(s, 'bot', M.fill('reroute', { hospital: h.short })); say(s, 'bot', lastCheckText(h, ctx)); s.step = 'waiting';
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: h.short, km: h.km }));
     await tell(s, ctx, 'emt', '108 EMT', M.fill('driverChange', { hospital: h.short, km: h.km }));
     await tell(s, ctx, h.id, h.short, incomingText(s, h));
@@ -170,13 +180,21 @@ async function afterEngine(s, ctx, prev, r, minutes) {
 
 async function hospitalReply(s, ctx, a) {
   const c = s.cur;
-  if (!c || !['sent', 'ivr', 'routed'].includes(c.state)) return s;
+  if (!c || !['sent', 'ivr', 'routed', 'fallback'].includes(c.state)) return s;
   const kind = a.kind === 'ready-in' ? 'ready-in' : a.kind === 'not-available' ? 'not-available' : 'all-ready';
   const minutes = kind === 'ready-in' ? Math.min(240, Math.max(1, Math.round(Number(a.minutes) || 15))) : null;
   const prev = c.proposal;
   const r = E.onHospitalReply(c, prev, kind === 'ready-in' ? { kind, minutes } : { kind }, s.facilities, CFG, ctx.now());
   if (r === c) return s;
   setCur(s, r); s.ivrAt = null;
+  if (c.state === 'fallback' && r.state === 'fallback') {
+    if (r.fallbackDeclined && !c.fallbackDeclined) {
+      const h = fac(s, prev);
+      say(s, 'bot', M.fill('fallbackDeclined', { hospital: h.short, id: r.id }));
+      await tell(s, ctx, 'district', 'District officer', M.fill('fallbackDeclined', { hospital: h.short, id: r.id }));
+    }
+    return s;
+  }
   await afterEngine(s, ctx, prev, r, minutes);
   return s;
 }
@@ -376,7 +394,7 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
 }
 
 async function reset(s, ctx, a) {
-  const fresh = blank(s.id, s.live, a.scenario || s.scenario);
+  const fresh = blank(s.id, s.live, a.scenario || s.scenario, ctx.now());
   // Summary links already sent to a doctor keep working until they expire, even after Reset.
   const links = {};
   Object.keys(s.links || {}).forEach((k) => { if (s.links[k].expires > ctx.now()) links[k] = s.links[k]; });

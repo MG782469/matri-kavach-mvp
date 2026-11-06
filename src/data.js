@@ -61,6 +61,8 @@
     baseline: { doorMin: 131, firstReadyPct: 52, source: 'Simulation, 20,000 synthetic night emergencies' },
     // How long the blood bank holds a unit for a confirmed referral before it is released.
     bloodHoldMin: 60,
+    // A shift check-in older than this is shown as old: the hospital must confirm before it is trusted.
+    checkinValidHours: 8,
     // Synthetic monthly readiness report for the district dashboard (not real data).
     monthReport: {
       month: 'October 2026 (synthetic)', shifts: 93,

@@ -572,3 +572,66 @@ test('doctor summary link is an ISBAR handover', async () => {
     ['I · Identify', 'S · Situation', 'B · Background', 'A · Nurse facts', 'R · Request', 'blood, anaesthetist, theatre'].forEach((x) => assert.ok(html.includes(x), x));
   } finally { h.server.close(); }
 });
+
+test('nobody ready: medical college is only proposed; doctor, blood bank and family wait for its confirmation', async () => {
+  const h = await boot();
+  try {
+    await h.act(SID, 'reset', { scenario: 'nobody' });
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    let r = (await h.act(SID, 'details', { patient: PATIENT })).body;
+    assert.strictEqual(r.cur.state, 'fallback');
+    assert.strictEqual(r.step, 'waiting');
+    assert.ok(r.chat.some((m) => /District emergency escalation initiated\. Medical college proposed as tertiary fallback, subject to clinical coordination and state referral protocols\./.test(m.text)));
+    assert.ok(!r.chat.some((m) => /Medical college is the destination/.test(m.text)));
+    assert.ok(!r.outbox.some((o) => ['doctor', 'family', 'bloodbank'].includes(o.role)));
+    assert.ok(r.outbox.some((o) => o.role === 'district' && /tertiary fallback/.test(o.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'mc' && /TERTIARY FALLBACK/.test(o.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'driver' && /proposed tertiary fallback/.test(o.text)));
+    r = (await h.act(SID, 'arrived', { value: 'Yes' })).body;
+    assert.ok(!r.cur.arrived);
+    r = (await h.act(SID, 'hospitalReply', { kind: 'all-ready' })).body;
+    assert.strictEqual(r.cur.state, 'confirmed');
+    assert.strictEqual(r.cur.confirmed, 'mc');
+    assert.strictEqual(r.step, 'close');
+    assert.ok(r.outbox.some((o) => o.role === 'doctor') && r.outbox.some((o) => o.role === 'family'));
+  } finally { h.server.close(); }
+});
+
+test('nobody ready and the medical college cannot confirm: district and clinicians decide, nothing is auto-accepted', async () => {
+  const h = await boot();
+  try {
+    await h.act(SID, 'reset', { scenario: 'nobody' });
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    await h.act(SID, 'details', { patient: PATIENT });
+    const r = (await h.act(SID, 'hospitalReply', { kind: 'not-available' })).body;
+    assert.strictEqual(r.cur.state, 'fallback');
+    assert.strictEqual(r.cur.fallbackDeclined, true);
+    assert.ok(r.outbox.some((o) => o.role === 'district' && /cannot confirm/.test(o.text)));
+    assert.ok(!r.outbox.some((o) => o.role === 'doctor'));
+  } finally { h.server.close(); }
+});
+
+test('proposal shows the real last check-in time, and an old check-in is shown as unconfirmed', async () => {
+  const h = await boot();
+  try {
+    await h.act(SID, 'reset', {});
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    let r = (await h.act(SID, 'details', { patient: PATIENT })).body;
+    const at = r.facilities.find((f) => f.id === 'dh').checkin.at;
+    assert.strictEqual(at, 1_000_000);
+    const line = r.chat[r.chat.length - 1].text;
+    assert.match(line, /^Last readiness check: .+, by Sister Anjali \(self-reported at the shift check-in\)\. Not yet confirmed for this case: DH Devgarh must reply\.$/);
+    await h.act(SID, 'reset', {});
+    h.advance(9 * 60 * 60 * 1000);
+    await h.act(SID, 'checkin', { facility: 'sdh', items: {} });
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    r = (await h.act(SID, 'details', { patient: PATIENT })).body;
+    assert.match(r.chat[r.chat.length - 1].text, /more than 8 hours ago\. Treat it as unconfirmed until DH Devgarh replies/);
+  } finally { h.server.close(); }
+});
+
+test('no unverified security claim on the call screen', async () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'chat.html'), 'utf8');
+  assert.ok(!/end-to-end encrypted/i.test(html));
+  assert.match(html, /Automated call \(demo\)/);
+});

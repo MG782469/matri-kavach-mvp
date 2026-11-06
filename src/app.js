@@ -47,7 +47,7 @@
     say('nurse', 'Details sent: ' + S.form.name + ', ' + S.form.age + ', ' + S.form.blood + ', delivered ' + S.form.time);
     var r = E.propose(S.cur, S.facilities, D, now());
     setCur(r);
-    if (r.state === 'fallback') { say('bot', M.T.fallback); S.step = 'close'; }
+    if (r.state === 'fallback') { say('bot', M.T.fallback); S.step = 'waiting'; }
     else { var h = fac(r.proposal); say('bot', M.fill('proposed', { hospital: h.short, km: h.km, eta: E.etaMinutes(h.km, D) })); S.step = 'proposed'; }
     render();
   }
@@ -76,7 +76,7 @@
 
   function hospitalReply(kind, minutes, hospitalId) {
     if (LIVE) return act('hospitalReply', { kind: kind, minutes: minutes });
-    if (!S.cur || S.cur.state !== 'sent' && S.cur.state !== 'ivr' && S.cur.state !== 'routed') return;
+    if (!S.cur || ['sent', 'ivr', 'routed', 'fallback'].indexOf(S.cur.state) === -1) return;
     if (hospitalId && S.cur.proposal !== hospitalId) return;
     S.auto = null;
     var h = fac(S.cur.proposal);
@@ -93,7 +93,7 @@
       say('bot', minutes ? M.fill('readyIn', { hospital: h.short, min: minutes, time: '2:30 am' }) : M.fill('ready', { hospital: h.short, time: '2:30 am' }));
       S.step = 'close';
     } else if (r.state === 'fallback') {
-      say('bot', M.T.fallback); S.step = 'close';
+      say('bot', M.T.fallback); S.step = 'waiting';
     } else if (r.state === 'sent' && r.proposal !== prev) {
       say('bot', M.fill('reroute', { hospital: fac(r.proposal).short })); S.step = 'waiting';
       autoReplyFor(r.proposal);
@@ -186,7 +186,9 @@
     } else if (S.step === 'proposed') {
       body = '<div class="opts"><button class="btn primary" data-act="send">SEND</button><button class="btn" data-act="change">CHANGE</button></div>';
     } else if (S.step === 'waiting') {
-      body = r && r.state === 'sent' ? '<div class="status">Hospital reply: <span data-cd class="timer">02:00</span></div>' : '<div class="status">Waiting for the hospital reply.</div>';
+      body = r && r.state === 'sent' ? '<div class="status">Hospital reply: <span data-cd class="timer">02:00</span></div>'
+        : r && r.state === 'fallback' ? '<div class="status">' + esc(r.fallbackDeclined ? 'The medical college cannot confirm. The district officer and clinicians are deciding the destination.' : 'District escalation started. The medical college is proposed only, not accepted. Waiting for it to confirm.') + '</div>'
+        : '<div class="status">Waiting for the hospital reply.</div>';
     } else if (S.step === 'close' && r && !r.arrived) {
       body = '<div class="opts"><button class="btn primary" data-act="arrived" data-v="Yes">1 Yes, arrived</button><button class="btn" data-act="arrived" data-v="No">2 No</button><button class="btn" data-act="arrived" data-v="Transferred">3 Transferred</button></div>';
     } else if (S.step === 'close' && r && r.arrived === 'Yes' && !r.readyOnArrival) {
@@ -220,7 +222,7 @@
     var html = '<div class="card"><div class="lbl">Incoming referral to ' + esc(target.name) + '</div>' +
       '<p>' + esc(M.fill('incoming', { type: typeOf().short, needs: typeOf().needs, eta: E.etaMinutes(target.km, D), group: p.blood || D.mother.bloodGroup })) + '</p>' +
       '<ul class="checks">' + checklistRows(target) + '</ul></div>';
-    if (S.cur.state === 'sent' || S.cur.state === 'routed') {
+    if (S.cur.state === 'sent' || S.cur.state === 'routed' || (S.cur.state === 'fallback' && !S.cur.fallbackDeclined)) {
       html += '<div class="opts"><button class="btn primary" data-act="reply" data-v="all-ready">1 All ready</button>' +
         '<button class="btn" data-act="reply" data-v="ready-in">2 Ready in 15 min</button>' +
         '<button class="btn" data-act="reply" data-v="not-available">3 Not available</button></div>';
@@ -235,8 +237,9 @@
   function renderAlerts() {
     var el = document.getElementById('alerts-body');
     var r = S.cur;
-    if (!r || (r.state !== 'confirmed' && r.state !== 'fallback' && r.state !== 'closed')) { el.innerHTML = '<p class="empty">Doctor, blood bank, family and district alerts appear here once a hospital confirms or the medical college is the destination.</p>' + outboxCard(); return; }
-    var h = fac(r.state === 'fallback' ? 'mc' : (r.confirmed || r.proposal));
+    if (r && r.state === 'fallback') { el.innerHTML = card('District officer', 'Escalation', M.fill('district', { id: r.id })) + '<p class="empty">The medical college is proposed, not accepted. Doctor, blood bank and family are told only after it confirms.</p>' + outboxCard(); return; }
+    if (!r || (r.state !== 'confirmed' && r.state !== 'closed')) { el.innerHTML = '<p class="empty">Doctor, blood bank, family and district alerts appear here once a hospital confirms.</p>' + outboxCard(); return; }
+    var h = fac(r.confirmed || r.destination || r.proposal);
     var p = r.patient || D.mother;
     var cards = [
       card('Receiving doctor', 'Summary', M.T.doctor + ' Patient: ' + p.name + ', ' + p.age + ', ' + p.blood + '.'),
@@ -270,7 +273,8 @@
         var st = E.facilityStatus(f, D, t.id);
         return '<td>' + (st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">Uncertain</span>' : st === 'full' ? '<span class="pill bad">Full</span>' : '<span class="pill bad">Not ready</span>') + '</td>';
       }).join('');
-      return '<tr><td>' + esc(f.short) + '</td>' + pills + '<td>' + E.etaMinutes(f.km, D) + ' min</td><td>' + esc(f.blood) + '</td></tr>';
+      var last = f.checkin && f.checkin.at ? new Date(f.checkin.at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }).toLowerCase() + (now() - f.checkin.at > (D.checkinValidHours || 8) * 3600000 ? ' (old)' : '') : 'none';
+      return '<tr><td>' + esc(f.short) + '</td>' + pills + '<td>' + esc(last) + '</td><td>' + E.etaMinutes(f.km, D) + ' min</td><td>' + esc(f.blood) + '</td></tr>';
     }).join('');
     var list = refs.length ? refs.map(function (r) { return '<li>' + esc(r.id) + ' · ' + esc(r.state) + (r.destination ? ' · ' + esc(fac(r.destination) ? fac(r.destination).short : r.destination) : '') + '</li>'; }).join('') : '<li>No referrals yet.</li>';
     var k = E.kpis(refs, S.facilities, D), B = D.baseline;
@@ -279,7 +283,7 @@
       kt('Decision to hospital door (estimated)', k.doorMin, ' min', 'Today: ' + B.doorMin + ' min (simulation)') +
       kt('First hospital asked was ready', k.firstReadyPct, '%', 'Today: ' + B.firstReadyPct + '% (simulation)') +
       kt('Not ready on arrival', k.checked ? k.mismatches + ' of ' + k.checked : null, '', 'Caught by the nurse arrival check') +
-      '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
+      '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>Last check</th><th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
       '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>' + timelineCard() + monthCard();
   }
 

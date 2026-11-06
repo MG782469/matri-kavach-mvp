@@ -74,8 +74,9 @@
   }
 
   function sendToFallback(ref, now) {
-    return Object.assign({}, ref, { state: 'fallback', destination: 'mc', proposal: 'mc', districtAlert: true, decidedAt: now,
-      events: note(ref, now, 'No Ready hospital. Medical college is the destination. District officer alerted') });
+    // The medical college is only proposed. It still has to confirm, and the district coordinates with the clinicians.
+    return Object.assign({}, ref, { state: 'fallback', destination: 'mc', proposal: 'mc', districtAlert: true,
+      events: note(ref, now, 'No hospital confirmed readiness. District emergency escalation initiated. Medical college proposed as tertiary fallback, awaiting confirmation') });
   }
 
   // After a reroute the ambulance is told the new hospital at once, and the 2-minute timer starts again.
@@ -93,6 +94,10 @@
       var min = reply.kind === 'ready-in' ? reply.minutes : null;
       return Object.assign({}, ref, { state: 'confirmed', confirmed: facilityId, readyIn: min, decidedAt: now,
         events: note(ref, now, fname + ' confirmed ' + (min ? 'ready in ' + min + ' min' : 'ALL READY')) });
+    }
+    if (reply.kind === 'not-available' && ref.state === 'fallback') {
+      return Object.assign({}, ref, { fallbackDeclined: true,
+        events: note(ref, now, fname + ' cannot confirm. District and clinicians coordinating the destination') });
     }
     if (reply.kind === 'not-available') {
       var moved = Object.assign({}, ref, { tried: ref.tried.concat([facilityId]),

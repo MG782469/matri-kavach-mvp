@@ -43,7 +43,7 @@ function createApp(opts = {}) {
     const prev = locks.get(id) || Promise.resolve();
     const run = prev.catch(() => {}).then(async () => {
       let s = await store.get(id);
-      if (!s) s = S.blank(id, live);
+      if (!s) s = S.blank(id, live, undefined, ctx.now());
       const out = await fn(s);
       await store.put(s);
       return out === undefined ? s : out;
@@ -125,7 +125,7 @@ function createApp(opts = {}) {
         if (s.step === 'close' || s.step === 'done' || !c || bot.length) return;
       }
       if (!c) return;
-      if (['sent', 'ivr', 'routed'].includes(c.state) && isRole(c.proposal)) {
+      if (['sent', 'ivr', 'routed', 'fallback'].includes(c.state) && isRole(c.proposal)) {
         if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready' }); reply = 'Thank you. Recorded: ALL READY.'; }
         else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'not-available' }); reply = 'Recorded: not available. We are rerouting.'; }
         else if (/^2/.test(body)) {
