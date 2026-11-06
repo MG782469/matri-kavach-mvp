@@ -1,0 +1,46 @@
+{
+ "assumptions": {
+  "district": "60x60 km, 15 PHCs, 5 receiving hospitals",
+  "speed_kmph": 30,
+  "road_detour": 1.4,
+  "night_readiness": "CHCs 40-45%, DH 75%, MC 97% (MC never refuses)",
+  "lost_at_unready_facility_min": 60,
+  "reply_window_min": 2,
+  "ivr_extra_min": 3,
+  "reply_rate": 0.85,
+  "status_accuracy": 0.9,
+  "wrong_ready_confirmation": 0.05
+ },
+ "nearest_hospital": {
+  "median_min": 51,
+  "mean_min": 131,
+  "p90_min": 297,
+  "pct_first_facility_ready": 52.4,
+  "pct_2plus_facilities": 47.6,
+  "pct_rerouted_in_transit": 0.0
+ },
+ "matri_kavach_85pct_checkins": {
+  "median_min": 46,
+  "mean_min": 63,
+  "p90_min": 117,
+  "pct_first_facility_ready": 97.0,
+  "pct_2plus_facilities": 3.0,
+  "pct_rerouted_in_transit": 41.1
+ },
+ "matri_kavach_60pct_checkins": {
+  "median_min": 46,
+  "mean_min": 63,
+  "p90_min": 117,
+  "pct_first_facility_ready": 97.0,
+  "pct_2plus_facilities": 3.0,
+  "pct_rerouted_in_transit": 42.5
+ },
+ "matri_kavach_no_checkins_confirm_only": {
+  "median_min": 48,
+  "mean_min": 64,
+  "p90_min": 119,
+  "pct_first_facility_ready": 96.6,
+  "pct_2plus_facilities": 3.4,
+  "pct_rerouted_in_transit": 46.5
+ }
+}

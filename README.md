@@ -6,20 +6,30 @@ A referral routing service for maternal emergencies. A PHC nurse starts a heavy-
 
 ## For judges (no login)
 
-Open the link. Each visitor gets a private session on the live server.
+Open https://matri-kavach.onrender.com/chat (WhatsApp-style view, recommended) or the dashboard at https://matri-kavach.onrender.com/. Each visitor gets a private session that sends nothing to real phones. Tap *How to test* or *Auto-play* for a guided run.
 
-1. Nurse tab: tap *Heavy bleeding after delivery*, then *Send details*, then *SEND*.
-2. Hospital phone tab: tap *1 All ready* (or wait 2 minutes to see the IVR call and the reroute).
-3. Alerts tab: doctor summary, blood bank, family and district messages. The doctor link opens a facts-only page that expires after 2 hours.
-4. Nurse tab: close the loop. District dashboard shows the closure rate.
+1. Nurse chat: pick *Heavy bleeding after delivery* (or type `BLEED B+`), fill the short form, then *SEND*.
+2. The proposal shows the hospital, the ETA and *Last readiness check: time, by whom*. That time comes from the hospital's latest saved shift check-in. A check-in older than 8 hours is shown as old and unconfirmed. A check-in is never shown as confirmed availability: only the hospital's reply for this case confirms.
+3. Hospital duty phone: tap *1 All ready*, or wait 2 minutes to see the automated call and the reroute.
+4. Doctor, blood bank, 108 driver and EMT, family and district chats show what each person gets.
+5. Nurse chat: arrival check, close the loop, discharge back-referral. The district view shows the KPIs.
 
-Use *No hospital ready* to see the medical-college fallback with a district alert. *Reset* starts over.
+Use the *No hospital ready* scenario to see the fallback: "No hospital has confirmed readiness. District emergency escalation initiated. Medical college proposed as tertiary fallback, subject to clinical coordination and state referral protocols." The medical college is only proposed. Until it replies Yes, no doctor, family or blood bank message goes out and no arrival step is shown. If it says No, the district and clinicians coordinate the destination.
 
-Only the heavy-bleeding checklist is switched on, because it is the one signed by the clinical partner. Eclampsia and obstructed-labour lists are drafts and stay off.
+Emergency types: heavy bleeding (checklist signed by the clinical partner) and fits / eclampsia (reviewed by the clinical partner, pending obstetrician validation, and the app says so). Obstructed labour and others tell the nurse to call the doctor and are not routed.
+
+The call screen in `/chat` is labelled *Automated call (demo)*. The demo makes no encryption or security claim.
 
 ## How routing works (plain code, no AI)
 
-`src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item is yes for the current shift. No check-in this shift means *uncertain*, never routed as ready. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND starts a 120 second timer, no reply means an IVR call, no answer means the next candidate and a fresh timer. If nobody is ready the medical college is the destination and the district officer is alerted. The same inputs always give the same route (tested).
+`src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital, no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).
+
+## Simulation (synthetic, in `sim/`)
+
+- `sim/Matri-Kavach_v3_simulation.py` and its output `sim/sim.json`: the original 20,000-case estimate. It tests a probability-ranked "confirm while driving" policy, which is **not** the exact MVP algorithm.
+- `sim/mvp_engine_sim.js` and its output `sim/mvp_engine_sim.json`: the same synthetic district, but the hospital choice, reroutes and fallback come from the real `src/engine.js`. Run `node sim/mvp_engine_sim.js`.
+
+Both use made-up hospital positions and readiness rates. They are estimates, not trial results.
 
 ## Live mode
 

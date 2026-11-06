@@ -1,0 +1,170 @@
+{
+ "note": "Synthetic only. Drives src/engine.js. Same district as Matri-Kavach_v3_simulation.py.",
+ "assumptions": {
+  "speedKmh": 30,
+  "detour": 1.4,
+  "lostAtUnreadyMin": 60,
+  "replyMin": 2,
+  "ivrExtraMin": 3,
+  "ivrShare": 0.15,
+  "checkinCorrect": 0.9,
+  "wrongReady": 0.05,
+  "n": 20000
+ },
+ "runs": {
+  "checkins_85pct_seed1": {
+   "nearest": {
+    "median_min": 61,
+    "mean_min": 129,
+    "p90_min": 294,
+    "pct_ready_on_first_physical_stop": 52.6,
+    "pct_first_hospital_asked_was_ready": 52.6,
+    "pct_2plus_physical_stops": 47.4,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 61,
+    "mean_min": 66,
+    "p90_min": 122,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 91.9,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7.7,
+    "pct_medical_college_fallback": 12.5
+   }
+  },
+  "checkins_60pct_seed1": {
+   "nearest": {
+    "median_min": 61,
+    "mean_min": 129,
+    "p90_min": 294,
+    "pct_ready_on_first_physical_stop": 52.6,
+    "pct_first_hospital_asked_was_ready": 52.6,
+    "pct_2plus_physical_stops": 47.4,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 75,
+    "mean_min": 77,
+    "p90_min": 148,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 92.7,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7,
+    "pct_medical_college_fallback": 26.4
+   }
+  },
+  "checkins_0pct_seed1": {
+   "nearest": {
+    "median_min": 61,
+    "mean_min": 129,
+    "p90_min": 294,
+    "pct_ready_on_first_physical_stop": 52.6,
+    "pct_first_hospital_asked_was_ready": 52.6,
+    "pct_2plus_physical_stops": 47.4,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 97,
+    "mean_min": 112,
+    "p90_min": 160,
+    "pct_ready_on_first_physical_stop": 100,
+    "pct_first_hospital_asked_was_ready": 100,
+    "pct_2plus_physical_stops": 0,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 100
+   }
+  },
+  "checkins_85pct_seed2": {
+   "nearest": {
+    "median_min": 52,
+    "mean_min": 126,
+    "p90_min": 285,
+    "pct_ready_on_first_physical_stop": 51.9,
+    "pct_first_hospital_asked_was_ready": 51.9,
+    "pct_2plus_physical_stops": 48.1,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 52,
+    "mean_min": 69,
+    "p90_min": 120,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 92.3,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7.4,
+    "pct_medical_college_fallback": 12.9
+   }
+  },
+  "checkins_85pct_seed3": {
+   "nearest": {
+    "median_min": 43,
+    "mean_min": 117,
+    "p90_min": 281,
+    "pct_ready_on_first_physical_stop": 57.2,
+    "pct_first_hospital_asked_was_ready": 57.2,
+    "pct_2plus_physical_stops": 42.8,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 54,
+    "mean_min": 65,
+    "p90_min": 108,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 92.1,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7.5,
+    "pct_medical_college_fallback": 12.9
+   }
+  },
+  "checkins_85pct_seed4": {
+   "nearest": {
+    "median_min": 47,
+    "mean_min": 119,
+    "p90_min": 286,
+    "pct_ready_on_first_physical_stop": 56.9,
+    "pct_first_hospital_asked_was_ready": 56.9,
+    "pct_2plus_physical_stops": 43.1,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 55,
+    "mean_min": 64,
+    "p90_min": 112,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 92.1,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7.5,
+    "pct_medical_college_fallback": 12.7
+   }
+  },
+  "checkins_85pct_seed5": {
+   "nearest": {
+    "median_min": 42,
+    "mean_min": 120,
+    "p90_min": 284,
+    "pct_ready_on_first_physical_stop": 55,
+    "pct_first_hospital_asked_was_ready": 55,
+    "pct_2plus_physical_stops": 45,
+    "pct_rerouted_in_transit": 0,
+    "pct_medical_college_fallback": 0
+   },
+   "mvp_engine": {
+    "median_min": 64,
+    "mean_min": 68,
+    "p90_min": 117,
+    "pct_ready_on_first_physical_stop": 99.6,
+    "pct_first_hospital_asked_was_ready": 92,
+    "pct_2plus_physical_stops": 0.4,
+    "pct_rerouted_in_transit": 7.7,
+    "pct_medical_college_fallback": 12.8
+   }
+  }
+ }
+}
