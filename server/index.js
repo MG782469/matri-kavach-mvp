@@ -107,8 +107,16 @@ function createApp(opts = {}) {
     let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
     await withSession('live', true, async (s) => {
       const c = s.cur;
-      if (isRole('nurse') && /^(hi+|hello+|hey+|namaste|namaskar)\b/i.test(body) && (!c || s.step === 'done')) {
-        await S.ACTIONS.nurseText(s, ctx, { text: body }); reply = M.T.hello; return;
+      const dest = c && (c.confirmed || c.destination);
+      if (dest && isRole(dest) && /^team\b/i.test(body)) { await S.ACTIONS.teamReady(s, ctx); reply = 'Recorded: team ready at the door. The PHC and the 108 EMT have been told.'; return; }
+      if (dest && isRole(dest) && /^disch/i.test(body)) { await S.ACTIONS.discharge(s, ctx); reply = 'Recorded: discharged home. The PHC and ASHA have the back-referral.'; return; }
+      if (isRole('nurse') && (!c || ['done', 'proposed', 'close'].includes(s.step))) {
+        const n = s.chat.length;
+        await S.ACTIONS.nurseText(s, ctx, { text: body });
+        const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
+        const next = s.step === 'close' ? S.closePrompt(s) : null;
+        reply = (next && !bot.includes(next) ? bot.concat([next]) : bot).join('\n') || reply;
+        if (s.step === 'close' || s.step === 'done' || !c || bot.length) return;
       }
       if (!c) return;
       if (['sent', 'ivr', 'routed'].includes(c.state) && isRole(c.proposal)) {
@@ -120,15 +128,6 @@ function createApp(opts = {}) {
           if (!minutes) reply = 'Please send 2 and the minutes, for example: 2 20';
           else { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'ready-in', minutes }); reply = `Recorded: ready in ${minutes} min.`; }
         } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available).';
-      } else if (['confirmed', 'fallback'].includes(c.state) && isRole('nurse')) {
-        if (!c.arrived) {
-          const v = { 1: 'Yes', 2: 'No', 3: 'Transferred' }[body[0]];
-          if (v) { await S.ACTIONS.arrived(s, ctx, { value: v }); reply = v === 'Yes' ? M.T.outcomeQ : M.T.closed; }
-          else reply = M.T.closeQ;
-        } else {
-          const v = { 1: 'Delivered', 2: 'Other' }[body[0]];
-          if (v) { await S.ACTIONS.outcome(s, ctx, { value: v }); reply = M.T.closed; } else reply = M.T.outcomeQ;
-        }
       }
     });
     return reply;

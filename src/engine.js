@@ -83,16 +83,19 @@
     return p.state === 'routed' ? sendTo(p, now) : p;
   }
 
+  function nameOf(facilities, id) { var f = (facilities || []).filter(function (x) { return x.id === id; })[0]; return f ? f.name : id; }
+
   function onHospitalReply(ref, facilityId, reply, facilities, D, now) {
     if (facilityId !== ref.proposal && facilityId !== ref.destination) return ref;
+    var fname = nameOf(facilities, facilityId);
     if (reply.kind === 'all-ready' || reply.kind === 'ready-in') {
       var min = reply.kind === 'ready-in' ? reply.minutes : null;
       return Object.assign({}, ref, { state: 'confirmed', confirmed: facilityId, readyIn: min,
-        events: note(ref, now, facilityId + ' confirmed ' + (min ? 'ready in ' + min + ' min' : 'ALL READY')) });
+        events: note(ref, now, fname + ' confirmed ' + (min ? 'ready in ' + min + ' min' : 'ALL READY')) });
     }
     if (reply.kind === 'not-available') {
       var moved = Object.assign({}, ref, { tried: ref.tried.concat([facilityId]),
-        events: note(ref, now, facilityId + ' not available. Rerouting') });
+        events: note(ref, now, fname + ' not available. Rerouting') });
       return reroute(moved, facilities, D, now);
     }
     return ref;
@@ -109,7 +112,7 @@
     if (ref.state !== 'ivr') return ref;
     if (answer === '1') {
       return Object.assign({}, ref, { state: 'confirmed', confirmed: ref.proposal,
-        events: note(ref, now, ref.proposal + ' confirmed by IVR') });
+        events: note(ref, now, nameOf(facilities, ref.proposal) + ' confirmed by IVR') });
     }
     var moved = Object.assign({}, ref, { tried: ref.tried.concat([ref.proposal]),
       events: note(ref, now, 'IVR not answered. Rerouting to the backup') });

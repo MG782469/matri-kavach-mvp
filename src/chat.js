@@ -54,11 +54,19 @@
     if (step === 'details') return { list: 'Fill patient details', act: 'open-details' };
     if (step === 'proposed') return { row: [['send', '', 'SEND'], ['change', '', 'CHANGE']] };
     if (step === 'close' && r && !r.arrived) return { extra: M.T.closeQ, btns: [['arrived', 'Yes', '1 Yes, arrived'], ['arrived', 'No', '2 No'], ['arrived', 'Transferred', '3 Transferred']] };
+    if (step === 'close' && r && r.arrived === 'Yes' && !r.readyOnArrival) return { btns: [['ready', 'Yes', '1 Yes, all ready'], ['ready', 'No', '2 No, something missing']] };
+    if (step === 'close' && r && r.readyOnArrival === 'No' && !r.missing) return { btns: MK.engine.itemsFor(r.type, D).map(function (it) { return ['missing', it.id, it.label]; }) };
     if (step === 'close' && r && r.arrived === 'Yes' && !r.outcome) return { btns: [['outcome', 'Delivered', '1 Delivered'], ['outcome', 'Other', '2 Other']] };
     return null;
   }
   function hospitalCanReply(role) { var r = cur(); return r && r.proposal === role && ['sent', 'routed', 'ivr'].indexOf(r.state) !== -1; }
 
+  function hospitalAfter(role) {
+    var r = cur(); if (!r || !isHospital(role) || (r.confirmed || r.destination) !== role) return null;
+    if (r.state === 'confirmed' && !r.teamReadyAt && !r.arrived) return ['team', '', 'Team ready at the door'];
+    if (r.state === 'closed' && r.arrived === 'Yes' && !r.dischargedAt) return ['discharge', '', 'Mark discharged home'];
+    return null;
+  }
   function btnHtml(b) { return '<button data-act="' + b[0] + '" data-v="' + esc(b[1]) + '">' + esc(b[2]) + '</button>'; }
 
   function bubble(m, extra) {
@@ -93,6 +101,8 @@
       }
       html += bubble(m, extra);
     });
+    var ha = hospitalAfter(VIEW);
+    if (ha) html += '<div class="grp in"><div class="qr">' + btnHtml(ha) + '</div></div>';
     if (VIEW === 'nurse') {
       var nb = nurseButtons();
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
@@ -142,8 +152,11 @@
     if (r.state === 'sent') return [r.proposal, 'The ambulance is already moving. Open the ' + fac(r.proposal).short + ' phone and tap 1 All ready, or tap Skip 2 minutes to see what happens when nobody replies.'];
     if (r.state === 'ivr') return [r.proposal, fac(r.proposal).short + ' is getting an automatic call. Open its phone and press 1, or tap No answer to see the reroute.'];
     if (r.state === 'fallback' || (step === 'close' && r.districtAlert && !r.arrived)) return ['district', 'Nobody was ready, so the medical college is the destination and the district officer was alerted. Look at those phones, then close the case on the Nurse phone.'];
+    if (step === 'close' && !r.arrived && !r.teamReadyAt && r.state === 'confirmed') return [r.confirmed, 'Confirmed. The hospital can tap Team ready at the door. The doctor, blood bank, family, driver and EMT were told. Then record arrival on the Nurse phone.'];
     if (step === 'close' && !r.arrived) return ['doctor', 'Confirmed. The doctor, blood bank and family were told at the same moment. Look at their phones, then record arrival on the Nurse phone.'];
+    if (step === 'close' && r.arrived === 'Yes' && !r.readyOnArrival) return ['nurse', 'Say whether the hospital was really ready on arrival. A No alerts the district: this is how false check-ins get caught.'];
     if (step === 'close') return ['nurse', 'Record the outcome on the Nurse phone.'];
+    if (r.state === 'closed' && r.arrived === 'Yes' && !r.dischargedAt) return [r.confirmed || r.destination, 'Later, the hospital taps Mark discharged home. The PHC and ASHA get the back-referral for day 3, 7 and 42 visits.'];
     if (r.state === 'closed') return ['asha', 'Loop closed. The PHC and ASHA got the follow-up plan. Tap Reset to run again.'];
     return ['nurse', ''];
   }
@@ -158,7 +171,11 @@
       var dest = r.destination || r.confirmed || r.proposal;
       html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state) + '</dd>' +
         (dest && fac(dest) ? '<dt>Hospital</dt><dd>' + esc(fac(dest).name) + '</dd>' : '') +
-        (r.patient ? '<dt>Mother</dt><dd>' + esc(r.patient.name) + ', ' + esc(r.patient.age) + ', ' + esc(r.patient.blood) + '</dd>' : '') + '</dl></div>';
+        (r.patient ? '<dt>Mother</dt><dd>' + esc([r.patient.name, r.patient.age, r.patient.blood].filter(Boolean).join(', ')) + '</dd>' : '') + '</dl></div>';
+      html += '<div class="panel"><h2>Case timeline</h2><ol class="tl">' + (r.events || []).map(function (e) {
+        var mins = Math.round((e.at - r.createdAt) / 60000);
+        return '<li><b>' + esc(clock(e.at)) + '</b> <span class="plus">+' + mins + ' min</span><br>' + esc(e.text) + '</li>';
+      }).join('') + '</ol></div>';
     }
     var rows = ST.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
       var st = MK.engine.facilityStatus(f, D, typeOf().id);
@@ -214,6 +231,7 @@
       '<button class="opt" data-scn="confirms"><span>New case: hospital confirms</span></button>' +
       '<button class="opt" data-scn="nobody"><span>New case: no hospital ready<small>Nobody passes the checklist tonight</small></span></button>' +
       ((!r || r.state === 'closed' || r.state === 'confirmed') ? '<button class="opt" data-act="miss"><span>Demo: DH Devgarh misses the night check-in<small>It turns Uncertain, gets a reminder, district is told</small></span></button>' : '') +
+      '<button class="opt" data-act="report"><span>Demo: monthly readiness report to district<small>Which hospital was not ready, how often, and why</small></span></button>' +
       '<button class="opt" data-act="help"><span>How to test</span></button>' +
       '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
       '<a class="opt" href="' + esc($('classic').getAttribute('href')) + '"><span>Open the dashboard view</span></a>');
@@ -232,7 +250,9 @@
       '<li><b>Nurse phone:</b> type <b>Hi</b>, tap <b>Choose emergency</b>, pick <b>Heavy bleeding</b>, then <b>Fill patient details</b> and Send. The values are filled in.</li>' +
       '<li><b>See the routing:</b> CHC Sonpur is skipped (no anaesthetist tonight) and DH Devgarh is proposed. Tap <b>SEND</b>.</li>' +
       '<li><b>Switch phone</b> (bar under the header) to <b>DH Devgarh</b> and tap <b>1 All ready</b>. Then look at the Doctor, Family, 108 driver and 108 EMT phones.</li>' +
-      '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li></ol>' +
+      '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li>' +
+      '<li><b>Close the loop:</b> on arrival the nurse says if everything was really ready (a No alerts the district), the hospital marks discharge, and the PHC and ASHA get the back-referral. The side panel shows the case timeline.</li>' +
+      '<li><b>Quick keyword:</b> type <b>BLEED B+</b> or <b>FITS O+</b> instead of Hi, like an SMS.</li></ol>' +
       '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
   }
   function typeSheet() {
@@ -248,7 +268,7 @@
     var qs = form.map(function (q) { return q.options ? s('f-' + q.id, q.label, q.options, q.options[0]) : f('f-' + q.id, q.label, q.value || ''); });
     var pairs = ''; for (var i = 0; i < qs.length; i += 2) pairs += qs[i + 1] ? '<div class="two">' + qs[i] + qs[i + 1] + '</div>' : qs[i];
     openSheet('<h3>Patient details: ' + esc(t.short) + '</h3><p class="sub2">Facts only. Yes / No / Unknown, never a guess.</p>' + f('f-name', 'Name', m.name) + '<div class="two">' + f('f-age', 'Age', m.age) + f('f-blood', 'Blood group (MCP card)', m.bloodGroup) + '</div>' +
-      f('f-contact', 'Family contact', m.contact) + pairs + '<button class="go" data-act="details-send">Send</button>');
+      f('f-contact', 'Family contact', m.contact) + pairs + s('f-informed', 'Family told that details go to the hospital?', ['Yes', 'No'], 'Yes') + '<button class="go" data-act="details-send">Send</button>');
   }
 
   /* ---------- server ---------- */
@@ -303,7 +323,7 @@
       else if (a === 'type-send') { var sel = document.querySelector('.sheet .opt[aria-checked="true"]'); closeSheet(); act('startReferral', { typeId: sel ? sel.dataset.v : 'bleeding' }); }
       else if (a === 'details-send') {
         var g = function (id) { var el = $(id); return el ? el.value : ''; };
-        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact') };
+        var patient = { name: g('f-name'), age: g('f-age'), blood: g('f-blood'), contact: g('f-contact'), informed: g('f-informed') };
         (D.forms[typeOf().id] || D.forms.bleeding).forEach(function (q) { patient[q.id] = g('f-' + q.id); });
         closeSheet(); act('details', { patient: patient });
       }
@@ -312,6 +332,11 @@
       else if (a === 'reply') { var label = { 'all-ready': '1 All ready', 'ready-in': '2 Ready in 15 min', 'not-available': '3 Not available' }[v]; echo(VIEW, label); act('hospitalReply', { kind: v, minutes: v === 'ready-in' ? 15 : null }); }
       else if (a === 'ivr') { echo(VIEW, v === '1' ? 'Answered the call and pressed 1: all ready' : 'Did not answer the call'); act('ivrAnswer', { answer: v }); }
       else if (a === 'arrived') act('arrived', { value: v });
+      else if (a === 'ready') act('readyCheck', { value: v });
+      else if (a === 'missing') act('readyCheck', { missing: v });
+      else if (a === 'team') { echo(VIEW, 'Team ready at the door'); act('teamReady', {}); }
+      else if (a === 'discharge') { echo(VIEW, 'Discharged home'); act('discharge', {}); }
+      else if (a === 'report') { closeSheet(); act('monthlyReport', {}).then(function () { show('district'); }); }
       else if (a === 'outcome') act('outcome', { value: v });
     });
     setInterval(countdown, 500);
@@ -331,6 +356,9 @@
         return;
       }
     }
+    var ha = hospitalAfter(VIEW);
+    if (ha && ha[0] === 'team' && /^team/i.test(text)) { echo(VIEW, text); act('teamReady', {}); return; }
+    if (ha && ha[0] === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', {}); return; }
     echo(VIEW, text); LAST = ''; render();
   }
   function bindComposer() {

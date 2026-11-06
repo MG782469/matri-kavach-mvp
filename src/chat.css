@@ -139,3 +139,7 @@ a.opt { color: var(--ink); text-decoration: none; }
 .sheet .yn button[aria-pressed="true"]:last-child { background: #c0392b; color: #fff; }
 .sheet ol.help { padding-left: 20px; margin: 4px 0 8px; font-size: 14px; line-height: 1.45; }
 .sheet ol.help li { margin: 6px 0; }
+
+.side ol.tl { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.side ol.tl li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.side ol.tl .plus { color: var(--muted); font-size: 12px; }

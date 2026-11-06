@@ -57,6 +57,16 @@
       { id: 'obstructed', label: 'Obstructed labour', signed: false },
       { id: 'other', label: 'Other: call the doctor now', signed: false }
     ],
+    // Synthetic monthly readiness report for the district dashboard (not real data).
+    monthReport: {
+      month: 'October 2026 (synthetic)', shifts: 93,
+      rows: [
+        { id: 'chc', checkins: 84, gap: 'No anaesthetist on 22 nights', arrivals: 0, mismatches: 0 },
+        { id: 'dh', checkins: 92, gap: 'HDU bed full on 11 nights; B- blood short on 3 nights', arrivals: 18, mismatches: 1 },
+        { id: 'sdh', checkins: 90, gap: 'Obstetrician only on call (not on site) on 6 nights', arrivals: 9, mismatches: 0 },
+        { id: 'mc', checkins: 93, gap: 'No gaps reported', arrivals: 4, mismatches: 0 }
+      ]
+    },
     // What the nurse sends for each type, after name, age, blood group and family contact. Facts only, no diagnosis.
     forms: {
       bleeding: [

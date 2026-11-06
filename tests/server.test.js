@@ -52,6 +52,7 @@ test('web session: confirm, close the loop, nothing is really sent', async () =>
   assert.strictEqual(r.body.cur.state, 'confirmed');
   assert.ok(r.body.outbox.every((o) => o.status === 'simulated'));
   r = await h.act(SID, 'arrived', { value: 'Yes' });
+  r = await h.act(SID, 'readyCheck', { value: 'Yes' });
   r = await h.act(SID, 'outcome', { value: 'Delivered' });
   assert.strictEqual(r.body.cur.state, 'closed');
   assert.strictEqual(h.sent.length, 0);
@@ -260,6 +261,7 @@ test('WhatsApp-style view is served and closing a case records each nurse answer
     await toSent(h, SID);
     await h.act(SID, 'hospitalReply', { kind: 'all-ready' });
     await h.act(SID, 'arrived', { value: 'Yes' });
+    await h.act(SID, 'readyCheck', { value: 'Yes' });
     const done = (await h.act(SID, 'outcome', { value: 'Delivered' })).body;
     assert.strictEqual(done.cur.state, 'closed');
     assert.strictEqual(done.chat.filter((m) => m.text === 'Yes, arrived').length, 1);
@@ -365,5 +367,98 @@ test('108 EMT gets the nurse facts for care on the way; the driver still does no
     assert.match(emt, /Oxytocin 10 IU given: Yes/);
     assert.match(emt, /no diagnosis/);
     assert.ok(!/Oxytocin|B\+/.test(r.outbox.find((o) => o.role === 'driver').text));
+  } finally { h.server.close(); }
+});
+
+async function toConfirmed(h, sid) {
+  await toSent(h, sid);
+  return (await h.act(sid, 'hospitalReply', { kind: 'all-ready' })).body;
+}
+
+test('arrival check: "No, something missing" alerts the district with the item', async () => {
+  const h = await boot();
+  try {
+    await toConfirmed(h, SID);
+    let r = (await h.act(SID, 'arrived', { value: 'Yes' })).body;
+    assert.match(r.chat[r.chat.length - 1].text, /Was everything ready/);
+    r = (await h.act(SID, 'outcome', { value: 'Delivered' })).body;
+    assert.notStrictEqual(r.cur.state, 'closed');
+    r = (await h.act(SID, 'readyCheck', { value: 'No' })).body;
+    assert.match(r.chat[r.chat.length - 1].text, /What was missing/);
+    r = (await h.act(SID, 'readyCheck', { missing: 'anaesthetist' })).body;
+    assert.ok(r.outbox.some((o) => o.role === 'district' && /mismatch/.test(o.text) && /Anaesthetist/.test(o.text)));
+    r = (await h.act(SID, 'outcome', { value: 'Delivered' })).body;
+    assert.strictEqual(r.cur.state, 'closed');
+    assert.strictEqual(r.cur.missing, 'anaesthetist');
+  } finally { h.server.close(); }
+});
+
+test('team ready, discharge back-referral, timeline events and family-informed record', async () => {
+  const h = await boot();
+  try {
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    await h.act(SID, 'details', { patient: Object.assign({}, PATIENT, { informed: 'Yes' }) });
+    await h.act(SID, 'send', {});
+    let r = (await h.act(SID, 'hospitalReply', { kind: 'all-ready' })).body;
+    assert.ok(r.outbox.some((o) => o.role === 'dh' && /Reply TEAM/.test(o.text)));
+    r = (await h.act(SID, 'teamReady', {})).body;
+    assert.ok(r.chat.some((m) => /team is ready at the labour room door/.test(m.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'emt' && /team is ready/.test(o.text)));
+    await h.act(SID, 'arrived', { value: 'Yes' });
+    await h.act(SID, 'readyCheck', { value: 'Yes' });
+    await h.act(SID, 'outcome', { value: 'Delivered' });
+    r = (await h.act(SID, 'discharge', {})).body;
+    assert.ok(r.outbox.some((o) => o.role === 'asha' && /Back-referral/.test(o.text) && /day 3, 7 and 42/.test(o.text)));
+    const ev = r.cur.events.map((e) => e.text).join(' | ');
+    assert.match(ev, /Family informed that details go to the hospital: Yes/);
+    assert.match(ev, /team ready/);
+    assert.match(ev, /everything was ready on arrival/);
+    assert.match(ev, /Discharged home/);
+    assert.ok(r.cur.events.every((e) => typeof e.at === 'number'));
+  } finally { h.server.close(); }
+});
+
+test('quick keyword BLEED B+ starts a referral and proposes a hospital; SEND by text works', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'nurseText', { text: 'BLEED B+' })).body;
+    assert.strictEqual(r.cur.type, 'bleeding');
+    assert.strictEqual(r.cur.patient.blood, 'B+');
+    assert.strictEqual(r.step, 'proposed');
+    r = (await h.act(SID, 'nurseText', { text: 'send' })).body;
+    assert.strictEqual(r.cur.state, 'sent');
+    const h2 = await boot();
+    const r2 = (await h2.act(SID, 'nurseText', { text: 'fits o pos' })).body;
+    assert.strictEqual(r2.cur.type, 'fits');
+    assert.strictEqual(r2.cur.patient.blood, 'O+');
+    assert.strictEqual(r2.cur.proposal, 'sdh');
+    h2.server.close();
+  } finally { h.server.close(); }
+});
+
+test('monthly readiness report goes to the district officer', async () => {
+  const h = await boot();
+  try {
+    const r = (await h.act(SID, 'monthlyReport', {})).body;
+    const t = r.outbox.find((o) => o.role === 'district').text;
+    assert.match(t, /Monthly readiness report/);
+    assert.match(t, /HDU bed full on 11 nights/);
+  } finally { h.server.close(); }
+});
+
+test('WhatsApp close flow by numbers: arrival, ready check, outcome', async () => {
+  const h = await boot();
+  process.env.PHONE_DH = '+919000000002';
+  try {
+    await h.act('live', 'startReferral', { typeId: 'bleeding' }, 'test-key');
+    await h.act('live', 'details', { patient: PATIENT }, 'test-key');
+    await h.act('live', 'send', {}, 'test-key');
+    await h.act('live', 'hospitalReply', { kind: 'all-ready' }, 'test-key');
+    process.env.PHONE_NURSE = '+919000000001';
+    const say = async (b) => (await h.form('/twilio/whatsapp', { From: 'whatsapp:+919000000001', Body: b })).text();
+    assert.match(await say('1'), /Was everything ready/);
+    assert.match(await say('2'), /What was missing\? Reply|What was missing/);
+    assert.match(await say('3'), /Outcome/);
+    assert.match(await say('1'), /Thank you/);
   } finally { h.server.close(); }
 });

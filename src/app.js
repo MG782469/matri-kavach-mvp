@@ -40,7 +40,7 @@
 
   function submitDetails() {
     var v = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
-    S.form = { name: v('f-name'), age: v('f-age'), blood: v('f-blood'), contact: v('f-contact') };
+    S.form = { name: v('f-name'), age: v('f-age'), blood: v('f-blood'), contact: v('f-contact'), informed: v('f-informed') };
     (D.forms[typeOf().id] || D.forms.bleeding).forEach(function (q) { S.form[q.id] = v('f-' + q.id); });
     if (LIVE) return act('details', { patient: S.form });
     S.cur = Object.assign({}, S.cur, { patient: S.form });
@@ -181,6 +181,7 @@
         field('f-name', 'Name', p.name) + field('f-age', 'Age', p.age) + field('f-blood', 'Blood group (MCP card)', p.blood) +
         field('f-contact', 'Family contact', p.contact) +
         form.map(function (q) { return q.options ? select('f-' + q.id, q.label, q.options, p[q.id] || q.options[0]) : field('f-' + q.id, q.label, p[q.id] || q.value || ''); }).join('') +
+        select('f-informed', 'Family told that details go to the hospital?', ['Yes', 'No'], p.informed || 'Yes') +
         '<button class="btn primary" data-act="details">Send details</button></div>';
     } else if (S.step === 'proposed') {
       body = '<div class="opts"><button class="btn primary" data-act="send">SEND</button><button class="btn" data-act="change">CHANGE</button></div>';
@@ -188,6 +189,10 @@
       body = r && r.state === 'sent' ? '<div class="status">Hospital reply: <span data-cd class="timer">02:00</span></div>' : '<div class="status">Waiting for the hospital reply.</div>';
     } else if (S.step === 'close' && r && !r.arrived) {
       body = '<div class="opts"><button class="btn primary" data-act="arrived" data-v="Yes">1 Yes, arrived</button><button class="btn" data-act="arrived" data-v="No">2 No</button><button class="btn" data-act="arrived" data-v="Transferred">3 Transferred</button></div>';
+    } else if (S.step === 'close' && r && r.arrived === 'Yes' && !r.readyOnArrival) {
+      body = '<p class="how">Was everything ready when she arrived?</p><div class="opts"><button class="btn primary" data-act="ready" data-v="Yes">1 Yes, all ready</button><button class="btn" data-act="ready" data-v="No">2 No, something missing</button></div>';
+    } else if (S.step === 'close' && r && r.readyOnArrival === 'No' && !r.missing) {
+      body = '<p class="how">What was missing?</p><div class="opts">' + E.itemsFor(r.type, D).map(function (it) { return '<button class="btn" data-act="missing" data-v="' + it.id + '">' + esc(it.label) + '</button>'; }).join('') + '</div>';
     } else if (S.step === 'close' && r && !r.outcome) {
       body = '<div class="opts"><button class="btn primary" data-act="outcome" data-v="Delivered">1 Delivered</button><button class="btn" data-act="outcome" data-v="Other">2 Other</button></div>';
     } else if (r && r.state === 'closed') {
@@ -221,6 +226,8 @@
         '<button class="btn" data-act="reply" data-v="not-available">3 Not available</button></div>';
       if (S.cur.state === 'sent') html += '<div class="status">Reply window: <span data-cd class="timer">02:00</span> <button class="btn small" data-act="skip">Skip 2 minutes (demo)</button></div>';
     }
+    if (S.cur.state === 'confirmed' && !S.cur.teamReadyAt && !S.cur.arrived) html += '<div class="opts"><button class="btn primary" data-act="team">Team ready at the door</button></div>';
+    if (S.cur.state === 'closed' && S.cur.arrived === 'Yes' && !S.cur.dischargedAt) html += '<div class="opts"><button class="btn primary" data-act="discharge">Mark discharged home</button></div>';
     if (S.cur.state === 'ivr') html += '<div class="card"><div class="lbl">IVR call to duty phone</div><p>' + esc(M.fill('ivrScript', { type: typeOf().short, eta: E.etaMinutes(target.km, D) })) + '</p><div class="opts"><button class="btn primary" data-act="ivr" data-v="1">Press 1</button><button class="btn" data-act="ivr" data-v="none">No answer</button></div></div>';
     el.innerHTML = html;
   }
@@ -268,7 +275,26 @@
     var list = refs.length ? refs.map(function (r) { return '<li>' + esc(r.id) + ' · ' + esc(r.state) + (r.destination ? ' · ' + esc(fac(r.destination) ? fac(r.destination).short : r.destination) : '') + '</li>'; }).join('') : '<li>No referrals yet.</li>';
     el.innerHTML = '<div class="tile kpi"><div class="lbl">Referral loop closure rate</div><div class="big">' + Math.round(rate * 100) + '%</div><p>' + closed + ' of ' + refs.length + ' referrals closed. Synthetic data.</p></div>' +
       '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
-      '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>';
+      '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>' + timelineCard() + monthCard();
+  }
+
+  function timelineCard() {
+    var r = S.cur; if (!r) return '';
+    return '<div class="card"><div class="lbl">Case timeline, ' + esc(r.id) + '</div><ul class="log">' + (r.events || []).map(function (e) {
+      return '<li><b>+' + Math.round((e.at - r.createdAt) / 60000) + ' min</b> · ' + esc(e.text) + '</li>';
+    }).join('') + '</ul></div>';
+  }
+
+  function monthCard() {
+    var R = D.monthReport; if (!R) return '';
+    var done = S.refs.filter(function (r) { return r.readyOnArrival; });
+    var rows = R.rows.map(function (x) {
+      var f = fac(x.id) || {};
+      return '<tr><td>' + esc(f.short) + '</td><td>' + x.checkins + ' / ' + R.shifts + '</td><td>' + esc(x.gap) + '</td><td>' + (x.arrivals ? (x.arrivals - x.mismatches) + ' / ' + x.arrivals : '-') + '</td></tr>';
+    }).join('');
+    return '<div class="card"><div class="lbl">Monthly readiness gaps, ' + esc(R.month) + '</div><div style="overflow-x:auto"><table><tr><th>Hospital</th><th>Check-ins done</th><th>Main gap</th><th>Ready on arrival</th></tr>' + rows + '</table></div>' +
+      (done.length ? '<p>This session: ready on arrival in ' + done.filter(function (r) { return r.readyOnArrival === 'Yes'; }).length + ' of ' + done.length + ' cases.</p>' : '') +
+      '<div class="opts"><button class="btn" data-act="report">Send this report to the district officer</button></div></div>';
   }
 
   function bind() {
@@ -286,6 +312,11 @@
       else if (a === 'ivr') ivrAnswer(b.dataset.v);
       else if (a === 'skip') skipTwoMinutes();
       else if (a === 'arrived' && LIVE) act('arrived', { value: b.dataset.v });
+      else if (a === 'ready') act('readyCheck', { value: b.dataset.v });
+      else if (a === 'missing') act('readyCheck', { missing: b.dataset.v });
+      else if (a === 'team') act('teamReady', {});
+      else if (a === 'discharge') act('discharge', {});
+      else if (a === 'report') act('monthlyReport', {});
       else if (a === 'outcome' && LIVE) act('outcome', { value: b.dataset.v });
       else if (a === 'arrived') { if (b.dataset.v === 'Yes') { S.step = 'close'; S.cur = Object.assign({}, S.cur, { arrived: 'Yes' }); say('nurse', 'Yes, arrived'); say('bot', M.T.outcomeQ); render(); } else closeOut(b.dataset.v, null); }
       else if (a === 'outcome') closeOut('Yes', b.dataset.v);
