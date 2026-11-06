@@ -60,6 +60,14 @@ const incomingText = (s, f) => {
   return M.fill('incoming', { type: t.short, needs: t.needs, eta: eta(f), group: clean(p.blood, 6) || D0.mother.bloodGroup }) +
     ' Reply with the number. For 2, add the minutes, for example: 2 20.';
 };
+/* The 108 EMT (the clinical person in the ambulance) gets the nurse's facts. The driver does not. */
+const emtText = (s, f) => {
+  const p = (s.cur && s.cur.patient) || {};
+  const t = typeOf(s);
+  const facts = formFor(t.id).filter((q) => p[q.id]).map((q) => q.label.replace(/\?$/, '') + ': ' + clean(p[q.id], 20)).join('; ');
+  return M.fill('emt', { type: t.short, name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), group: clean(p.blood, 6) || D0.mother.bloodGroup,
+    facts: facts || 'not sent yet', hospital: f.short, eta: eta(f) });
+};
 const ivrText = (s, f) => M.fill('ivrScript', { type: typeOf(s).short, eta: eta(f) });
 
 async function startReferral(s, ctx, a) {
@@ -93,6 +101,7 @@ async function goFallback(s, ctx) {
   const mc = fac(s, 'mc');
   say(s, 'bot', M.T.fallback); s.step = 'close';
   await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: mc.short, km: mc.km }));
+  await tell(s, ctx, 'emt', '108 EMT', M.fill('driverChange', { hospital: mc.short, km: mc.km }));
   await tell(s, ctx, 'mc', 'Medical college', incomingText(s, mc));
   await tell(s, ctx, 'district', 'District officer', M.fill('district', { id: s.cur.id }));
   await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, 'mc'));
@@ -112,6 +121,7 @@ async function send(s, ctx) {
   setCur(s, r); s.step = 'waiting'; say(s, 'nurse', 'SEND'); say(s, 'bot', M.T.sent);
   const h = fac(s, r.proposal);
   await tell(s, ctx, 'driver', '108 driver', M.fill('driver', { from: D0.startPoint.name, hospital: h.short, km: h.km }));
+  await tell(s, ctx, 'emt', '108 EMT', emtText(s, h));
   await tell(s, ctx, r.proposal, h.short, incomingText(s, h));
   return s;
 }
@@ -126,6 +136,7 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, h.id));
     if (typeOf(s).bloodBank) await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short, group: clean(((s.cur && s.cur.patient) || {}).blood, 6) || D0.mother.bloodGroup }));
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverOk', { hospital: h.short }));
+    await tell(s, ctx, 'emt', '108 EMT', M.fill('emtOk', { hospital: h.short }));
     await tell(s, ctx, 'family', 'Family', M.fill('family', { hospital: h.short, eta: eta(h) }));
   } else if (r.state === 'fallback') {
     await goFallback(s, ctx);
@@ -133,6 +144,7 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     const h = fac(s, r.proposal);
     say(s, 'bot', M.fill('reroute', { hospital: h.short })); s.step = 'waiting';
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverChange', { hospital: h.short, km: h.km }));
+    await tell(s, ctx, 'emt', '108 EMT', M.fill('driverChange', { hospital: h.short, km: h.km }));
     await tell(s, ctx, h.id, h.short, incomingText(s, h));
   }
 }

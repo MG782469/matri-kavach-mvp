@@ -17,6 +17,7 @@
     { id: 'bloodbank', label: 'Blood bank', owner: 'Blood bank' },
     { id: 'family', label: 'Family', owner: 'Mother’s family' },
     { id: 'driver', label: '108 driver', owner: '108 ambulance driver' },
+    { id: 'emt', label: '108 EMT', owner: '108 ambulance EMT' },
     { id: 'district', label: 'District officer', owner: 'District MH officer' },
     { id: 'asha', label: 'PHC and ASHA', owner: 'PHC and ASHA Sunita' }
   ];
@@ -170,6 +171,7 @@
       '<dt>Doctor</dt><dd>Private summary link, expires</dd>' +
       '<dt>Blood bank</dt><dd>Blood group and hospital only</dd>' +
       '<dt>108 driver</dt><dd>Pickup and hospital only, no medical details</dd>' +
+      '<dt>108 EMT</dt><dd>Nurse facts and blood group, for care on the way</dd>' +
       '<dt>Family</dt><dd>Hospital and ETA only, no medical details</dd>' +
       '<dt>District</dt><dd>Case ID and alerts, no patient name</dd></dl></div>';
     $('side').innerHTML = html;
@@ -229,7 +231,7 @@
     openSheet('<h3>How to test (2 minutes)</h3><ol class="help">' +
       '<li><b>Nurse phone:</b> type <b>Hi</b>, tap <b>Choose emergency</b>, pick <b>Heavy bleeding</b>, then <b>Fill patient details</b> and Send. The values are filled in.</li>' +
       '<li><b>See the routing:</b> CHC Sonpur is skipped (no anaesthetist tonight) and DH Devgarh is proposed. Tap <b>SEND</b>.</li>' +
-      '<li><b>Switch phone</b> (bar under the header) to <b>DH Devgarh</b> and tap <b>1 All ready</b>. Then look at the Doctor, Family and 108 driver phones.</li>' +
+      '<li><b>Switch phone</b> (bar under the header) to <b>DH Devgarh</b> and tap <b>1 All ready</b>. Then look at the Doctor, Family, 108 driver and 108 EMT phones.</li>' +
       '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li></ol>' +
       '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
   }

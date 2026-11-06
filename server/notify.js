@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 
 const ROLE_ENV = {
   nurse: 'PHONE_NURSE', chc: 'PHONE_CHC', dh: 'PHONE_DH', sdh: 'PHONE_SDH', mc: 'PHONE_MC',
-  doctor: 'PHONE_DOCTOR', bloodbank: 'PHONE_BLOODBANK', family: 'PHONE_FAMILY', district: 'PHONE_DISTRICT', asha: 'PHONE_ASHA', driver: 'PHONE_DRIVER'
+  doctor: 'PHONE_DOCTOR', bloodbank: 'PHONE_BLOODBANK', family: 'PHONE_FAMILY', district: 'PHONE_DISTRICT', asha: 'PHONE_ASHA', driver: 'PHONE_DRIVER', emt: 'PHONE_EMT'
 };
 
 const digits = (p) => String(p || '').replace(/\D/g, '');

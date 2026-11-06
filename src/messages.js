@@ -28,6 +28,8 @@
     district: 'Referral [id]: no hospital ready tonight. Medical college is the destination.',
     driver: '108 trip: pick up at [from]. Go to [hospital], [km] km. The hospital is confirming now. Patient details are with the hospital, not on this phone.',
     driverChange: '108 change: go to [hospital] instead, [km] km. Turn now if already on the way.',
+    emt: '108 EMT handover: [type]. [name], [age] years, blood group [group]. Nurse facts: [facts]. Going to [hospital], about [eta] min. If she gets worse on the way, call the PHC doctor or the hospital labour room. Facts only, no diagnosis.',
+    emtOk: '[hospital] has confirmed. The labour room team is waiting. Hand over the nurse facts at the door.',
     driverOk: '108: [hospital] has confirmed. The labour room team will meet you at the door.',
     checkinSaved: 'Shift check-in saved for [hospital] by [who]: [yes] Yes, [no] No[missing]. Ready tonight for: [readyFor].',
     checkinRemind: 'Reminder: the night shift check-in for [hospital] is not done. Until you check in, this hospital shows as Uncertain and gets no referrals. Open the check-in and tap Yes or No for each item.',

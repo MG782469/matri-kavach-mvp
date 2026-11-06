@@ -354,3 +354,16 @@ test('missed check-in: hospital turns Uncertain, gets a reminder, district is to
     assert.strictEqual(r.cur.proposal, 'sdh');
   } finally { h.server.close(); }
 });
+
+test('108 EMT gets the nurse facts for care on the way; the driver still does not', async () => {
+  const h = await boot();
+  try {
+    const r = (await toSent(h, SID)).body;
+    const emt = r.outbox.find((o) => o.role === 'emt').text;
+    assert.match(emt, /Heavy bleeding/);
+    assert.match(emt, /B\+/);
+    assert.match(emt, /Oxytocin 10 IU given: Yes/);
+    assert.match(emt, /no diagnosis/);
+    assert.ok(!/Oxytocin|B\+/.test(r.outbox.find((o) => o.role === 'driver').text));
+  } finally { h.server.close(); }
+});
