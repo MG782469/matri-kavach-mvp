@@ -462,3 +462,113 @@ test('WhatsApp close flow by numbers: arrival, ready check, outcome', async () =
     assert.match(await say('1'), /Thank you/);
   } finally { h.server.close(); }
 });
+
+async function toDischarged(h, sid) {
+  await toConfirmed(h, sid);
+  await h.act(sid, 'arrived', { value: 'Yes' });
+  await h.act(sid, 'readyCheck', { value: 'Yes' });
+  await h.act(sid, 'outcome', { value: 'Delivered' });
+  return (await h.act(sid, 'discharge', {})).body;
+}
+
+test('hospital marks itself FULL: routing skips it, district is told, OPEN brings it back, it expires after 2 hours', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'setFull', { facility: 'dh', on: true })).body;
+    assert.strictEqual(r.facilities.find((f) => f.id === 'dh').full, true);
+    assert.ok(r.outbox.some((o) => o.role === 'district' && /Diversion: DH Devgarh/.test(o.text)));
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    r = (await h.act(SID, 'details', { patient: PATIENT })).body;
+    assert.strictEqual(r.cur.proposal, 'sdh');
+    await h.act(SID, 'reset', {});
+    r = (await h.act(SID, 'setFull', { facility: 'dh', on: true })).body;
+    r = (await h.act(SID, 'setFull', { facility: 'dh', on: false })).body;
+    assert.ok(!r.facilities.find((f) => f.id === 'dh').full);
+    await h.act(SID, 'setFull', { facility: 'dh', on: true });
+    h.advance(2 * 60 * 60 * 1000 + 1000);
+    await h.act(SID, 'startReferral', { typeId: 'bleeding' });
+    r = (await h.act(SID, 'details', { patient: PATIENT })).body;
+    assert.strictEqual(r.cur.proposal, 'dh');
+  } finally { h.server.close(); }
+});
+
+test('KPIs: estimated door time, first hospital ready, mismatches', async () => {
+  const E = require('../src/engine.js'); const D = require('../src/data.js');
+  const h = await boot();
+  try {
+    await toConfirmed(h, SID);
+    await h.act(SID, 'arrived', { value: 'Yes' });
+    const r = (await h.act(SID, 'readyCheck', { value: 'No', missing: 'blood' })).body;
+    const k = E.kpis(r.refs, r.facilities, D);
+    assert.strictEqual(k.doorMin, 59);
+    assert.strictEqual(k.firstReadyPct, 100);
+    assert.strictEqual(k.mismatches, 1);
+    assert.strictEqual(k.checked, 1);
+  } finally { h.server.close(); }
+});
+
+test('blood hold: held on confirm, issue on arrival, released if she never arrives', async () => {
+  const h = await boot();
+  try {
+    let r = await toConfirmed(h, SID);
+    r = (await h.act(SID, 'arrived', { value: 'Yes' })).body;
+    assert.ok(r.cur.bloodHoldUntil > 0);
+    assert.ok(r.outbox.some((o) => o.role === 'bloodbank' && /hold one B\+ unit until/.test(o.text)));
+    assert.ok(r.outbox.some((o) => o.role === 'bloodbank' && /Issue the held B\+ unit/.test(o.text)));
+    await h.act(SID, 'reset', {});
+    await toConfirmed(h, SID);
+    r = (await h.act(SID, 'arrived', { value: 'Transferred' })).body;
+    assert.ok(r.outbox.some((o) => o.role === 'bloodbank' && /Hold released/.test(o.text)));
+  } finally { h.server.close(); }
+});
+
+test('hospital feedback after discharge reaches the nurse chat', async () => {
+  const h = await boot();
+  try {
+    let r = await toDischarged(h, SID);
+    assert.ok(r.outbox.some((o) => o.role === 'dh' && /was the referral on time/.test(o.text)));
+    r = (await h.act(SID, 'feedback', { value: '2' })).body;
+    assert.strictEqual(r.cur.feedback, 'Should have come earlier');
+    assert.match(r.chat[r.chat.length - 1].text, /Feedback from DH Devgarh/);
+    r = (await h.act(SID, 'feedback', { value: '1' })).body;
+    assert.strictEqual(r.cur.feedback, 'Should have come earlier');
+  } finally { h.server.close(); }
+});
+
+test('mock drill: every hospital phone gets it, replies are timed, district gets the result', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'drill', {})).body;
+    assert.strictEqual(r.outbox.filter((o) => /^DRILL/.test(o.text)).length, 4);
+    h.advance(12000);
+    await h.act(SID, 'drillReply', { facility: 'dh' });
+    r = (await h.act(SID, 'drillReport', {})).body;
+    const t = r.outbox.find((o) => o.role === 'district' && /drill result/.test(o.text)).text;
+    assert.match(t, /DH Devgarh answered in 12 s/);
+    assert.match(t, /SDH Kheri no reply/);
+  } finally { h.server.close(); }
+});
+
+test('missed call with no internet: keypad 1 starts a heavy bleeding referral with details to follow', async () => {
+  const h = await boot();
+  try {
+    let r = (await h.act(SID, 'missedCall', {})).body;
+    assert.strictEqual(r.step, 'callback');
+    r = (await h.act(SID, 'nurseText', { text: '1' })).body;
+    assert.strictEqual(r.cur.type, 'bleeding');
+    assert.strictEqual(r.step, 'proposed');
+    assert.ok(r.cur.events.some((e) => /missed call/.test(e.text)));
+    r = (await h.act(SID, 'send', {})).body;
+    assert.ok(r.outbox.some((o) => o.role === 'dh' && /Blood group not known yet/.test(o.text)));
+  } finally { h.server.close(); }
+});
+
+test('doctor summary link is an ISBAR handover', async () => {
+  const h = await boot();
+  try {
+    const r = await toConfirmed(h, SID);
+    const link = r.outbox.find((o) => o.role === 'doctor').text.match(/\/s\/[a-f0-9.]+/)[0];
+    const html = await (await fetch(h.base + link)).text();
+    ['I · Identify', 'S · Situation', 'B · Background', 'A · Nurse facts', 'R · Request', 'blood, anaesthetist, theatre'].forEach((x) => assert.ok(html.includes(x), x));
+  } finally { h.server.close(); }
+});

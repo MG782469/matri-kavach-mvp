@@ -8,6 +8,8 @@ const M = require('../src/messages.js');
 const CFG = Object.assign({}, D0, { replyWindowSec: Number(process.env.REPLY_WINDOW_SEC) || D0.replyWindowSec });
 const IVR_WAIT_MS = (Number(process.env.IVR_WAIT_SEC) || 60) * 1000;
 const LINK_TTL_MS = 2 * 60 * 60 * 1000;
+const FULL_MS = 2 * 60 * 60 * 1000;
+const HOLD_MIN = Number(process.env.BLOOD_HOLD_MIN) || D0.bloodHoldMin || 60;
 const SCENARIOS = ['confirms', 'silent', 'nobody'];
 
 const seedFacilities = (scenario) => D0.facilities.map((f) => {
@@ -45,6 +47,7 @@ async function tell(s, ctx, role, label, text) {
 }
 
 const typeOf = (s) => D0.emergencyTypes.find((x) => x.id === (s.cur && s.cur.type)) || D0.emergencyTypes[0];
+const groupOf = (s) => (s.cur && s.cur.patient ? clean(s.cur.patient.blood, 6) || 'not known yet' : D0.mother.bloodGroup);
 const formFor = (typeId) => D0.forms[typeId] || D0.forms.bleeding;
 
 function summaryLink(s, ctx, hospital) {
@@ -54,7 +57,8 @@ function summaryLink(s, ctx, hospital) {
   const dest = fac(s, hospital);
   s.links[token] = { expires: ctx.now() + LINK_TTL_MS, hospital: dest.name, eta: eta(dest), ref: s.cur.id,
     type: t.label, review: t.review || '',
-    patient: { name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), blood: clean(p.blood || D0.mother.bloodGroup, 6) },
+    patient: { name: clean(p.name || D0.mother.name), age: clean(p.age, 4) || 'not given', blood: groupOf(s) },
+    needs: t.needs || '', from: D0.startPoint.name, informed: p.informed || 'Not recorded',
     facts: formFor(t.id).map((q) => ({ label: q.label, value: clean(p[q.id], 20) })) };
   return (ctx.baseUrl() || '') + '/s/' + token;
 }
@@ -62,7 +66,7 @@ function summaryLink(s, ctx, hospital) {
 const incomingText = (s, f) => {
   const p = (s.cur && s.cur.patient) || D0.mother;
   const t = typeOf(s);
-  return M.fill('incoming', { type: t.short, needs: t.needs, eta: eta(f), group: clean(p.blood, 6) || D0.mother.bloodGroup }) +
+  return M.fill('incoming', { type: t.short, needs: t.needs, eta: eta(f), group: groupOf(s) }) +
     ' Reply with the number. For 2, add the minutes, for example: 2 20.';
 };
 /* The 108 EMT (the clinical person in the ambulance) gets the nurse's facts. The driver does not. */
@@ -70,7 +74,7 @@ const emtText = (s, f) => {
   const p = (s.cur && s.cur.patient) || {};
   const t = typeOf(s);
   const facts = formFor(t.id).filter((q) => p[q.id]).map((q) => q.label.replace(/\?$/, '') + ': ' + clean(p[q.id], 20)).join('; ');
-  return M.fill('emt', { type: t.short, name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), group: clean(p.blood, 6) || D0.mother.bloodGroup,
+  return M.fill('emt', { type: t.short, name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), group: groupOf(s),
     facts: facts || 'not sent yet', hospital: f.short, eta: eta(f) });
 };
 const ivrText = (s, f) => M.fill('ivrScript', { type: typeOf(s).short, eta: eta(f) });
@@ -142,7 +146,13 @@ async function afterEngine(s, ctx, prev, r, minutes) {
     s.step = 'close';
     await tell(s, ctx, 'nurse', 'Nurse', minutes ? M.fill('readyIn', { hospital: h.short, min: minutes, time: arrive }) : M.fill('ready', { hospital: h.short, time: arrive }));
     await tell(s, ctx, 'doctor', 'Receiving doctor', 'Matri-Kavach summary (link expires in 2 hours): ' + summaryLink(s, ctx, h.id));
-    if (typeOf(s).bloodBank) await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short, group: clean(((s.cur && s.cur.patient) || {}).blood, 6) || D0.mother.bloodGroup }));
+    if (typeOf(s).bloodBank) {
+      const group = groupOf(s);
+      const until = ctx.now() + HOLD_MIN * 60000;
+      setCur(s, Object.assign({}, s.cur, { bloodHoldUntil: until }));
+      addEvent(s, ctx, `Blood bank asked to hold one ${group} unit until ${clock(until)}`);
+      await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short, group, until: clock(until), hold: HOLD_MIN }));
+    }
     await tell(s, ctx, h.id, h.short, M.T.hospAfter);
     await tell(s, ctx, 'driver', '108 driver', M.fill('driverOk', { hospital: h.short }));
     await tell(s, ctx, 'emt', '108 EMT', M.fill('emtOk', { hospital: h.short }));
@@ -191,7 +201,12 @@ async function arrived(s, ctx, a) {
   if (!s.cur || s.step !== 'close' || s.cur.arrived) return s;
   const v = ['Yes', 'No', 'Transferred'].includes(a.value) ? a.value : null;
   if (!v) return s;
-  if (v === 'Yes') { setCur(s, Object.assign({}, s.cur, { arrived: 'Yes' })); addEvent(s, ctx, 'Arrived at the hospital'); say(s, 'nurse', 'Yes, arrived'); say(s, 'bot', M.T.readyQ); return s; }
+  if (v === 'Yes') {
+    setCur(s, Object.assign({}, s.cur, { arrived: 'Yes', arrivedAt: ctx.now() })); addEvent(s, ctx, 'Arrived at the hospital'); say(s, 'nurse', 'Yes, arrived'); say(s, 'bot', M.T.readyQ);
+    const h = fac(s, s.cur.confirmed || s.cur.destination);
+    if (s.cur.bloodHoldUntil && h) await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('bloodIssue', { hospital: h.short, group: groupOf(s) }));
+    return s;
+  }
   return closeOut(s, ctx, v, null);
 }
 
@@ -243,6 +258,88 @@ async function discharge(s, ctx) {
   const text = M.fill('discharge', { hospital: h.short, name: clean((c.patient || D0.mother).name), time: clock(ctx.now()) });
   say(s, 'bot', text);
   await tell(s, ctx, 'asha', 'PHC and ASHA', text);
+  await tell(s, ctx, h.id, h.short, M.fill('feedbackQ', { id: c.id }));
+  return s;
+}
+
+const FEEDBACK = { 1: 'On time', 2: 'Should have come earlier', 3: 'Could have been managed at the PHC' };
+
+/* The receiving hospital tells the PHC whether the referral was on time. It is shown to the nurse for learning. */
+async function feedback(s, ctx, a) {
+  const c = s.cur;
+  const value = FEEDBACK[String(a.value)] || (Object.values(FEEDBACK).includes(a.value) ? a.value : null);
+  if (!c || !c.dischargedAt || c.feedback || !value) return s;
+  const h = fac(s, c.confirmed || c.destination);
+  setCur(s, Object.assign({}, c, { feedback: value })); addEvent(s, ctx, `Feedback from ${h.short}: ${value}`);
+  say(s, 'bot', M.fill('feedback', { hospital: h.short, id: c.id, value }));
+  return s;
+}
+
+/* Diversion: a hospital says it is full for the next 2 hours. Routing skips it until then, or until it says OPEN. */
+function expireFull(s, ctx) {
+  (s.facilities || []).forEach((f) => { if (f.full && f.fullUntil <= ctx.now()) { f.full = false; f.fullUntil = null; } });
+}
+async function setFull(s, ctx, a) {
+  const f = fac(s, String(a.facility || ''));
+  if (!f || f.kind !== 'hospital') return s;
+  const c = s.cur;
+  if (c && ['routed', 'sent', 'ivr'].includes(c.state) && c.proposal === f.id) return s; // answer the referral with 3 instead
+  if (a.on === false) {
+    if (!f.full) return s;
+    f.full = false; f.fullUntil = null;
+    await tell(s, ctx, f.id, f.short, M.fill('fullOff', { hospital: f.short }));
+    await tell(s, ctx, 'district', 'District officer', M.fill('fullOff', { hospital: f.short }));
+    return s;
+  }
+  f.full = true; f.fullUntil = ctx.now() + FULL_MS;
+  await tell(s, ctx, f.id, f.short, M.fill('fullOn', { hospital: f.short, time: clock(f.fullUntil) }));
+  await tell(s, ctx, 'district', 'District officer', M.fill('fullDistrict', { hospital: f.short, time: clock(f.fullUntil) }));
+  return s;
+}
+
+/* Weekly mock drill: every hospital phone gets a practice referral; the district sees who answered and how fast. */
+const busy = (s) => s.cur && ['referred', 'routed', 'sent', 'ivr', 'confirmed', 'fallback'].includes(s.cur.state);
+async function drill(s, ctx) {
+  if (busy(s) || (s.drill && !s.drill.done)) return s;
+  const ids = s.facilities.filter((f) => f.kind === 'hospital' || f.kind === 'fallback').map((f) => f.id);
+  s.drill = { at: ctx.now(), ids, replies: {}, done: false };
+  for (const id of ids) await tell(s, ctx, id, fac(s, id).short, M.T.drill);
+  return s;
+}
+async function drillReply(s, ctx, a) {
+  const d = s.drill; const id = String(a.facility || '');
+  if (!d || d.done || !d.ids.includes(id) || d.replies[id] != null) return s;
+  d.replies[id] = Math.max(1, Math.round((ctx.now() - d.at) / 1000));
+  if (d.ids.every((x) => d.replies[x] != null)) return drillReport(s, ctx);
+  return s;
+}
+const secs = (n) => (n >= 60 ? Math.floor(n / 60) + ' min ' + (n % 60) + ' s' : n + ' s');
+async function drillReport(s, ctx) {
+  const d = s.drill;
+  if (!d || d.done) return s;
+  d.done = true;
+  const rows = d.ids.map((id) => fac(s, id).short + (d.replies[id] != null ? ' answered in ' + secs(d.replies[id]) : ' no reply')).join('; ');
+  await tell(s, ctx, 'district', 'District officer', M.fill('drillReport', { rows }));
+  return s;
+}
+
+/* No internet at the PHC: the nurse gives a missed call, Matri-Kavach calls back and she picks the emergency on the keypad. */
+async function missedCall(s, ctx) {
+  if (s.cur && s.step !== 'done') return s;
+  if (s.step === 'done') await reset(s, ctx, {});
+  say(s, 'nurse', M.T.missedCall); say(s, 'bot', M.T.callback);
+  s.step = 'callback';
+  return s;
+}
+async function nurseCall(s, ctx, a) {
+  if (s.step !== 'callback') return s;
+  const typeId = { 1: 'bleeding', 2: 'fits' }[String(a.digit)];
+  if (!typeId) return s;
+  say(s, 'nurse', 'Pressed ' + a.digit);
+  await startReferral(s, ctx, { typeId });
+  addEvent(s, ctx, 'Started by missed call and keypad (no internet)');
+  say(s, 'bot', M.fill('callbackDone', { type: typeOf(s).short }));
+  await details(s, ctx, { patient: { name: 'Name to follow', informed: 'Not recorded' } });
   return s;
 }
 
@@ -270,6 +367,11 @@ async function closeOut(s, ctx, arrivedV, outcomeV) {
   say(s, 'bot', M.T.closed);
   const name = clean((r.patient || D0.mother).name);
   await tell(s, ctx, 'asha', 'PHC and ASHA', M.fill('asha', { name }));
+  if (r.bloodHoldUntil && arrivedV !== 'Yes') {
+    const h = fac(s, r.confirmed || r.destination);
+    addEvent(s, ctx, 'Blood hold released (mother did not arrive)');
+    await tell(s, ctx, 'bloodbank', 'Blood bank', M.fill('bloodRelease', { id: r.id, hospital: h ? h.short : 'the hospital', group: groupOf(s) }));
+  }
   return s;
 }
 
@@ -310,6 +412,7 @@ async function nurseText(s, ctx, a) {
   const text = clean(a.text, 120);
   if (!text) return s;
   if (GREETING.test(text) && (s.step === 'done' || !s.cur)) {
+    if (s.step === 'callback') s.step = 'start';
     if (s.step === 'done') await reset(s, ctx, {});
     say(s, 'nurse', text); say(s, 'bot', M.T.hello);
     return s;
@@ -325,6 +428,7 @@ async function nurseText(s, ctx, a) {
     await details(s, ctx, { patient: { name: 'Name to follow', blood: group, informed: 'Not recorded' }, quiet: true });
     return s;
   }
+  if (s.step === 'callback' && /^[12]$/.test(text)) return nurseCall(s, ctx, { digit: text });
   if (s.step === 'proposed' && /^send$/i.test(text)) return send(s, ctx);
   if (s.step === 'proposed' && /^change$/i.test(text)) return change(s, ctx);
   if (s.step === 'close' && /^[1-9]$/.test(text)) return closeDigit(s, ctx, text);
@@ -387,11 +491,15 @@ async function missCheckin(s, ctx, a) {
   return s;
 }
 
-const ACTIONS = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport };
+const RAW = { nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport,
+  feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall };
+/* Every action first lifts any "full" flag whose 2 hours have passed. */
+const ACTIONS = {};
+Object.keys(RAW).forEach((k) => { ACTIONS[k] = (s, ctx, a) => { expireFull(s, ctx); return RAW[k](s, ctx, a || {}); }; });
 
 function publicView(s, now) {
   return { id: s.id, live: s.live, scenario: s.scenario, facilities: s.facilities, refs: s.refs, cur: s.cur, chat: s.chat,
-    step: s.step, outbox: s.outbox.slice(-20), serverTime: now, replyWindowSec: CFG.replyWindowSec };
+    step: s.step, outbox: s.outbox.slice(-30), drill: s.drill || null, serverTime: now, replyWindowSec: CFG.replyWindowSec };
 }
 
-module.exports = { CFG, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt };
+module.exports = { CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt };

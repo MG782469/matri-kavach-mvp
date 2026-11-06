@@ -143,3 +143,10 @@ a.opt { color: var(--ink); text-decoration: none; }
 .side ol.tl { list-style: none; padding: 0; margin: 0; font-size: 13px; }
 .side ol.tl li { padding: 6px 0; border-bottom: 1px solid var(--line); }
 .side ol.tl .plus { color: var(--muted); font-size: 12px; }
+.kps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kp{border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kv2{font-size:22px;font-weight:700;line-height:1.1}
+.kv2 small{font-size:12px;font-weight:500;margin-left:2px}
+.kl{font-size:12px;color:var(--ink2)}
+.kb{font-size:11px;color:var(--muted)}
+.autobar{position:sticky;bottom:4px;font-weight:600}

@@ -20,6 +20,7 @@
   }
 
   function facilityStatus(f, D, typeId) {
+    if (f.full) return 'full'; // the hospital said it is full (diversion) for the next hours
     if (!f.checkin) return 'uncertain';
     var ok = itemsFor(typeId, D).every(function (item) { return f.checkin.items[item.id] === true; });
     return ok ? 'ready' : 'not-ready';
@@ -68,12 +69,12 @@
 
   function sendTo(ref, now) {
     if (ref.state !== 'routed') return ref;
-    return Object.assign({}, ref, { state: 'sent', timerStart: now,
+    return Object.assign({}, ref, { state: 'sent', timerStart: now, firstAsked: ref.firstAsked || ref.proposal,
       events: note(ref, now, 'SEND: ambulance 108 told the destination. Hospital asked to confirm') });
   }
 
   function sendToFallback(ref, now) {
-    return Object.assign({}, ref, { state: 'fallback', destination: 'mc', proposal: 'mc', districtAlert: true,
+    return Object.assign({}, ref, { state: 'fallback', destination: 'mc', proposal: 'mc', districtAlert: true, decidedAt: now,
       events: note(ref, now, 'No Ready hospital. Medical college is the destination. District officer alerted') });
   }
 
@@ -90,7 +91,7 @@
     var fname = nameOf(facilities, facilityId);
     if (reply.kind === 'all-ready' || reply.kind === 'ready-in') {
       var min = reply.kind === 'ready-in' ? reply.minutes : null;
-      return Object.assign({}, ref, { state: 'confirmed', confirmed: facilityId, readyIn: min,
+      return Object.assign({}, ref, { state: 'confirmed', confirmed: facilityId, readyIn: min, decidedAt: now,
         events: note(ref, now, fname + ' confirmed ' + (min ? 'ready in ' + min + ' min' : 'ALL READY')) });
     }
     if (reply.kind === 'not-available') {
@@ -111,7 +112,7 @@
   function onIVR(ref, answer, facilities, D, now) {
     if (ref.state !== 'ivr') return ref;
     if (answer === '1') {
-      return Object.assign({}, ref, { state: 'confirmed', confirmed: ref.proposal,
+      return Object.assign({}, ref, { state: 'confirmed', confirmed: ref.proposal, decidedAt: now,
         events: note(ref, now, nameOf(facilities, ref.proposal) + ' confirmed by IVR') });
     }
     var moved = Object.assign({}, ref, { tried: ref.tried.concat([ref.proposal]),
@@ -131,11 +132,33 @@
     return closed / refs.length;
   }
 
+  /* District KPIs from this session's referrals.
+     Door time is estimated: minutes from the start of the referral to the hospital decision, plus the road ETA. */
+  function kpis(refs, facilities, D) {
+    function median(a) { if (!a.length) return null; a = a.slice().sort(function (x, y) { return x - y; }); var m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
+    var door = refs.filter(function (r) { return r.decidedAt; }).map(function (r) {
+      var f = (facilities || []).filter(function (x) { return x.id === (r.confirmed || r.destination); })[0];
+      return Math.round((r.decidedAt - r.createdAt) / 60000 + (f ? etaMinutes(f.km, D) : 0));
+    });
+    var asked = refs.filter(function (r) { return r.firstAsked && (r.confirmed || r.state === 'fallback' || r.state === 'closed'); });
+    var checked = refs.filter(function (r) { return r.readyOnArrival; });
+    var reply = refs.filter(function (r) { return r.confirmed && r.timerStart && r.decidedAt; }).map(function (r) { return Math.round((r.decidedAt - r.timerStart) / 1000); });
+    return {
+      cases: refs.length,
+      doorMin: median(door),
+      firstReadyPct: asked.length ? Math.round(100 * asked.filter(function (r) { return r.confirmed === r.firstAsked; }).length / asked.length) : null,
+      mismatches: checked.filter(function (r) { return r.readyOnArrival === 'No'; }).length,
+      checked: checked.length,
+      replySec: median(reply),
+      closedPct: refs.length ? Math.round(100 * closedLoopRate(refs)) : null
+    };
+  }
+
   var api = {
     etaMinutes: etaMinutes, itemsFor: itemsFor, facilityStatus: facilityStatus, candidatesFor: candidatesFor,
     startReferral: startReferral, propose: propose, changeProposal: changeProposal, sendTo: sendTo,
     onHospitalReply: onHospitalReply, onTimeout: onTimeout, onIVR: onIVR, onClose: onClose,
-    closedLoopRate: closedLoopRate, sendToFallback: sendToFallback, reroute: reroute
+    closedLoopRate: closedLoopRate, kpis: kpis, sendToFallback: sendToFallback, reroute: reroute
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MK = root.MK || {}; root.MK.engine = api;

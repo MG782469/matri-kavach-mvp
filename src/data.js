@@ -57,6 +57,10 @@
       { id: 'obstructed', label: 'Obstructed labour', signed: false },
       { id: 'other', label: 'Other: call the doctor now', signed: false }
     ],
+    // Baseline from our simulation of 20,000 synthetic night emergencies (not real data).
+    baseline: { doorMin: 131, firstReadyPct: 52, source: 'Simulation, 20,000 synthetic night emergencies' },
+    // How long the blood bank holds a unit for a confirmed referral before it is released.
+    bloodHoldMin: 60,
     // Synthetic monthly readiness report for the district dashboard (not real data).
     monthReport: {
       month: 'October 2026 (synthetic)', shifts: 93,

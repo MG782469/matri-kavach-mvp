@@ -110,7 +110,13 @@ function createApp(opts = {}) {
       const dest = c && (c.confirmed || c.destination);
       if (dest && isRole(dest) && /^team\b/i.test(body)) { await S.ACTIONS.teamReady(s, ctx); reply = 'Recorded: team ready at the door. The PHC and the 108 EMT have been told.'; return; }
       if (dest && isRole(dest) && /^disch/i.test(body)) { await S.ACTIONS.discharge(s, ctx); reply = 'Recorded: discharged home. The PHC and ASHA have the back-referral.'; return; }
-      if (isRole('nurse') && (!c || ['done', 'proposed', 'close'].includes(s.step))) {
+      if (dest && isRole(dest) && c.dischargedAt && !c.feedback && /^[123]\b/.test(body)) { await S.ACTIONS.feedback(s, ctx, { value: body[0] }); reply = 'Thank you. Your feedback was sent to the PHC.'; return; }
+      const hosp = s.facilities.find((f) => f.kind === 'hospital' && isRole(f.id));
+      if (hosp && /^full\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: true }); reply = hosp.full ? 'Recorded: FULL for 2 hours. Reply OPEN when you can take patients again.' : 'Please answer the referral first: reply 3 if you cannot take her.'; return; }
+      if (hosp && /^open\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: false }); reply = 'Recorded: open for referrals again.'; return; }
+      const drillFor = s.drill && !s.drill.done && s.drill.ids.find((id) => s.drill.replies[id] == null && isRole(id));
+      if (drillFor && /^1\b/.test(body) && !(c && ['sent', 'ivr', 'routed'].includes(c.state))) { await S.ACTIONS.drillReply(s, ctx, { facility: drillFor }); reply = 'Drill reply recorded. Thank you.'; return; }
+      if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step))) {
         const n = s.chat.length;
         await S.ACTIONS.nurseText(s, ctx, { text: body });
         const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
@@ -199,16 +205,17 @@ function createApp(opts = {}) {
     const sid = token.split('.')[0];
     const s = /^([a-f0-9]{16}|live)$/.test(sid) ? await store.get(sid) : null;
     const l = s && s.links && s.links[token];
-    const page = (title, body) => res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;margin:0;background:#f5f7fa;color:#232f3e}main{max-width:480px;margin:0 auto;padding:20px 16px}h1{color:#1f3da9;font-size:20px}.c{background:#fff;border:1px solid #d9dee5;border-radius:10px;padding:14px;margin:12px 0}dt{color:#5d6a79;font-size:13px;margin-top:8px}dd{margin:0;font-size:16px}.n{color:#5d6a79;font-size:12px}</style></head><body><main>${body}</main></body></html>`);
+    const page = (title, body) => res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;margin:0;background:#f5f7fa;color:#232f3e}main{max-width:480px;margin:0 auto;padding:20px 16px}h1{color:#1f3da9;font-size:20px}h2{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#1f3da9;margin:0 0 4px}.c{background:#fff;border:1px solid #d9dee5;border-radius:10px;padding:14px;margin:12px 0}dt{color:#5d6a79;font-size:13px;margin-top:8px}dd{margin:0;font-size:16px}.n{color:#5d6a79;font-size:12px}</style></head><body><main>${body}</main></body></html>`);
     if (!l) return page('Link not found', '<h1>Link not found</h1><p>This summary link does not exist.</p>');
     if (ctx.now() > l.expires) return res.status(410).type('html').send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link expired</title><body style="font-family:Arial;padding:20px"><h1 style="color:#1f3da9">Link expired</h1><p>This summary link was valid for 2 hours and has expired.</p>');
     const p = l.patient;
     const facts = (l.facts || []).map((f) => `<dt>${esc(f.label)}</dt><dd>${esc(f.value) || 'Not recorded'}</dd>`).join('');
-    page('Referral summary', `<h1>Referral summary</h1><div class="c"><dl>
-      <dt>Emergency (chosen by nurse)</dt><dd>${esc(l.type || '')}</dd>
-      <dt>Patient</dt><dd>${esc(p.name)}, ${esc(p.age)} years</dd>
-      <dt>Blood group</dt><dd>${esc(p.blood)}</dd>${facts}
-      <dt>Going to</dt><dd>${esc(l.hospital)}, about ${esc(l.eta)} min</dd></dl></div>
+    page('Referral summary', `<h1>Referral handover (ISBAR)</h1>
+      <div class="c"><h2>I · Identify</h2><dl><dt>From</dt><dd>${esc(l.from || 'PHC nurse')}, referral ${esc(l.ref || '')}</dd><dt>Patient</dt><dd>${esc(p.name)}, ${esc(p.age)}${/^\d+$/.test(String(p.age)) ? ' years' : ''}</dd></dl></div>
+      <div class="c"><h2>S · Situation</h2><dl><dt>Emergency (chosen by nurse)</dt><dd>${esc(l.type || '')}</dd><dt>Going to</dt><dd>${esc(l.hospital)}, about ${esc(l.eta)} min</dd></dl></div>
+      <div class="c"><h2>B · Background</h2><dl><dt>Blood group</dt><dd>${esc(p.blood)}</dd><dt>Family told details go to the hospital</dt><dd>${esc(l.informed || 'Not recorded')}</dd></dl></div>
+      <div class="c"><h2>A · Nurse facts</h2><dl>${facts || '<dd>Not sent yet</dd>'}</dl></div>
+      <div class="c"><h2>R · Request</h2><p>${l.needs ? 'Please have ready: ' + esc(l.needs) + '.' : 'Please be ready at the labour room door.'} Reply on the labour room phone if anything is missing.</p></div>
       ${l.review ? `<p class="n">Checklist: ${esc(l.review)}.</p>` : ''}<p class="n">Facts only, no diagnosis. Synthetic demo data. Link expires ${esc(new Date(l.expires).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' }))} IST.</p>`);
   });
 

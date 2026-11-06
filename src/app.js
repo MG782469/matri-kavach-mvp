@@ -240,7 +240,7 @@
     var p = r.patient || D.mother;
     var cards = [
       card('Receiving doctor', 'Summary', M.T.doctor + ' Patient: ' + p.name + ', ' + p.age + ', ' + p.blood + '.'),
-      card('Blood bank', 'Alert', M.fill('blood', { hospital: h.short })),
+      card('Blood bank', 'Alert', M.fill('blood', { hospital: h.short, group: (S.cur && S.cur.patient && S.cur.patient.blood) || D.mother.bloodGroup, until: S.cur && S.cur.bloodHoldUntil ? new Date(S.cur.bloodHoldUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : 'the next hour', hold: D.bloodHoldMin })),
       card('Family', 'Message', M.fill('family', { hospital: h.short, eta: E.etaMinutes(h.km, D) }))
     ];
     if (r.districtAlert) cards.push(card('District officer', 'Alert', M.fill('district', { id: r.id })));
@@ -268,12 +268,17 @@
     var rows = S.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
       var pills = TYPES.map(function (t) {
         var st = E.facilityStatus(f, D, t.id);
-        return '<td>' + (st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">Uncertain</span>' : '<span class="pill bad">Not ready</span>') + '</td>';
+        return '<td>' + (st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">Uncertain</span>' : st === 'full' ? '<span class="pill bad">Full</span>' : '<span class="pill bad">Not ready</span>') + '</td>';
       }).join('');
       return '<tr><td>' + esc(f.short) + '</td>' + pills + '<td>' + E.etaMinutes(f.km, D) + ' min</td><td>' + esc(f.blood) + '</td></tr>';
     }).join('');
     var list = refs.length ? refs.map(function (r) { return '<li>' + esc(r.id) + ' · ' + esc(r.state) + (r.destination ? ' · ' + esc(fac(r.destination) ? fac(r.destination).short : r.destination) : '') + '</li>'; }).join('') : '<li>No referrals yet.</li>';
+    var k = E.kpis(refs, S.facilities, D), B = D.baseline;
+    var kt = function (label, v, unit, base) { return '<div class="tile kpi"><div class="lbl">' + esc(label) + '</div><div class="big">' + (v == null ? '–' : esc(v) + unit) + '</div><p>' + esc(base) + '</p></div>'; };
     el.innerHTML = '<div class="tile kpi"><div class="lbl">Referral loop closure rate</div><div class="big">' + Math.round(rate * 100) + '%</div><p>' + closed + ' of ' + refs.length + ' referrals closed. Synthetic data.</p></div>' +
+      kt('Decision to hospital door (estimated)', k.doorMin, ' min', 'Today: ' + B.doorMin + ' min (simulation)') +
+      kt('First hospital asked was ready', k.firstReadyPct, '%', 'Today: ' + B.firstReadyPct + '% (simulation)') +
+      kt('Not ready on arrival', k.checked ? k.mismatches + ' of ' + k.checked : null, '', 'Caught by the nurse arrival check') +
       '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
       '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>' + timelineCard() + monthCard();
   }

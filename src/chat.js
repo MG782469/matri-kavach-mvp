@@ -6,6 +6,7 @@
   var ECHO = {}; // replies tapped on a hospital phone in this browser, shown as sent messages
   var CK = null; // check-in being filled on a hospital phone: { facility, items }
   var ALL_ITEMS = D.checklistItems.concat(D.extraItems || []);
+  var AUTO = null; // auto-play: { i, total, text, stop }
 
   var PHONES = [
     { id: 'nurse', label: 'Nurse', owner: 'Nurse Kavitha, PHC Rampur' },
@@ -51,6 +52,7 @@
   function nurseButtons() {
     var r = cur(), step = ST.step;
     if (step === 'start') return { list: 'Choose emergency', act: 'pick-type' };
+    if (step === 'callback') return { btns: [['ncall', '1', 'Press 1: Heavy bleeding'], ['ncall', '2', 'Press 2: Fits / eclampsia']] };
     if (step === 'details') return { list: 'Fill patient details', act: 'open-details' };
     if (step === 'proposed') return { row: [['send', '', 'SEND'], ['change', '', 'CHANGE']] };
     if (step === 'close' && r && !r.arrived) return { extra: M.T.closeQ, btns: [['arrived', 'Yes', '1 Yes, arrived'], ['arrived', 'No', '2 No'], ['arrived', 'Transferred', '3 Transferred']] };
@@ -61,11 +63,17 @@
   }
   function hospitalCanReply(role) { var r = cur(); return r && r.proposal === role && ['sent', 'routed', 'ivr'].indexOf(r.state) !== -1; }
 
+  function drillPending(role) { var d = ST.drill; return d && !d.done && d.ids.indexOf(role) !== -1 && d.replies[role] == null && !hospitalCanReply(role); }
+  /* Buttons a hospital phone shows after it confirmed: team ready, discharge, feedback. Plus the drill reply. */
   function hospitalAfter(role) {
-    var r = cur(); if (!r || !isHospital(role) || (r.confirmed || r.destination) !== role) return null;
-    if (r.state === 'confirmed' && !r.teamReadyAt && !r.arrived) return ['team', '', 'Team ready at the door'];
-    if (r.state === 'closed' && r.arrived === 'Yes' && !r.dischargedAt) return ['discharge', '', 'Mark discharged home'];
-    return null;
+    if (!isHospital(role)) return [];
+    if (drillPending(role)) return [['drillok', '', '1 Drill received']];
+    var r = cur(); if (!r || (r.confirmed || r.destination) !== role) return [];
+    if (r.state === 'confirmed' && !r.teamReadyAt && !r.arrived) return [['team', '', 'Team ready at the door']];
+    if (r.dischargedAt && !r.feedback) return [r.confirmed || r.destination, 'The hospital can tell the PHC if the referral was on time. This is for learning at the PHC monthly review.'];
+    if (r.state === 'closed' && r.arrived === 'Yes' && !r.dischargedAt) return [['discharge', '', 'Mark discharged home']];
+    if (r.dischargedAt && !r.feedback) return [['fb', '1', '1 On time'], ['fb', '2', '2 Should have come earlier'], ['fb', '3', '3 Could have been managed at the PHC']];
+    return [];
   }
   function btnHtml(b) { return '<button data-act="' + b[0] + '" data-v="' + esc(b[1]) + '">' + esc(b[2]) + '</button>'; }
 
@@ -102,7 +110,8 @@
       html += bubble(m, extra);
     });
     var ha = hospitalAfter(VIEW);
-    if (ha) html += '<div class="grp in"><div class="qr">' + btnHtml(ha) + '</div></div>';
+    if (ha.length) html += '<div class="grp in"><div class="qr">' + ha.map(btnHtml).join('') + '</div></div>';
+    if (AUTO) html += '<div class="sysmsg autobar">▶ Auto-play ' + AUTO.i + ' of ' + AUTO.total + ': ' + esc(AUTO.text) + ' <button data-act="auto-stop">Stop</button></div>';
     if (VIEW === 'nurse') {
       var nb = nurseButtons();
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
@@ -116,10 +125,18 @@
 
   function checkinBar(id) {
     var f = fac(id);
+    var full = f.kind !== 'hospital' ? '' : f.full
+      ? '<div class="sysmsg warnmsg">⛔ Marked <b>FULL</b> until ' + esc(clock(f.fullUntil)) + '. Referrals skip this hospital. <button data-act="full" data-v="0">Open again</button></div>'
+      : '';
+    return full + checkinLine(f);
+  }
+  function checkinLine(f) {
     if (!f.checkin) return '<div class="sysmsg warnmsg">⚠ Night shift check-in <b>not done</b>. This hospital shows as Uncertain and gets no referrals. <button data-act="checkin-open">Do check-in</button></div>';
     var yes = ALL_ITEMS.filter(function (it) { return f.checkin.items[it.id] === true; }).length;
-    var ready = D.emergencyTypes.filter(function (t) { return t.signed && MK.engine.facilityStatus(f, D, t.id) === 'ready'; }).map(function (t) { return t.short; });
-    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.who) + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button></div>';
+    var open = Object.assign({}, f, { full: false });
+    var ready = D.emergencyTypes.filter(function (t) { return t.signed && MK.engine.facilityStatus(open, D, t.id) === 'ready'; }).map(function (t) { return t.short; });
+    return '<div class="sysmsg">☑ Night shift check-in by ' + esc(f.who) + ': ' + yes + ' of ' + ALL_ITEMS.length + ' Yes. Ready for: <b>' + esc(ready.length ? ready.join(', ') : 'none') + '</b> <button data-act="checkin-open">Open check-in</button>' +
+      (f.kind === 'hospital' && !f.full ? ' <button data-act="full" data-v="1">Full for 2 hours</button>' : '') + '</div>';
   }
 
   function emptyText(role) {
@@ -139,12 +156,14 @@
     var others = PHONES.reduce(function (n, x) { return x.id === VIEW ? n : n + Math.max(0, countIn(x.id) - (SEEN[x.id] || 0)); }, 0);
     $('owner').innerHTML = '\ud83d\udcf1 Phone of <b>' + esc(p.owner) + '</b> <span class="sw">Switch phone \u25be</span>' + (others ? '<span class="badge">' + others + '</span>' : '');
     var nurseNew = VIEW === 'nurse' && (!ST.chat.length || ST.step === 'done');
-    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="Hello">Hello</button><button data-act="say" data-v="Namaste">Namaste</button><button data-act="help">How to test</button>' : '';
+    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="BLEED B+">BLEED B+</button><button data-act="mcall">📞 Missed call</button><button data-act="auto">▶ Auto-play</button><button data-act="help">How to test</button>' : '';
   }
 
   /* ---------- side panel: what to tap next, the case, readiness ---------- */
   function next() {
     var r = cur(), step = ST.step;
+    if (step === 'callback') return ['nurse', 'No internet: Matri-Kavach called the nurse back. Press 1 for heavy bleeding or 2 for fits. The referral starts with the details to follow.'];
+    if (ST.drill && !ST.drill.done && (!r || r.state === 'closed')) return ['dh', 'Mock drill running. Open each hospital phone and tap 1 Drill received, or send the result to the district from the ⋮ menu.'];
     if (!r && !ST.chat.length) return ['nurse', 'On the Nurse phone, type Hi (or tap the Hi chip). Matri-Kavach answers with the menu.'];
     if (!r || step === 'start') return ['nurse', 'On the Nurse phone, tap Choose emergency. Pick heavy bleeding, or fits / eclampsia to see that readiness differs by emergency.'];
     if (step === 'details') return ['nurse', 'Tap Fill patient details. The values are filled in for you, just tap Send.'];
@@ -171,15 +190,18 @@
       var dest = r.destination || r.confirmed || r.proposal;
       html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state) + '</dd>' +
         (dest && fac(dest) ? '<dt>Hospital</dt><dd>' + esc(fac(dest).name) + '</dd>' : '') +
-        (r.patient ? '<dt>Mother</dt><dd>' + esc([r.patient.name, r.patient.age, r.patient.blood].filter(Boolean).join(', ')) + '</dd>' : '') + '</dl></div>';
+        (r.patient ? '<dt>Mother</dt><dd>' + esc([r.patient.name, r.patient.age, r.patient.blood].filter(Boolean).join(', ')) + '</dd>' : '') +
+        (r.bloodHoldUntil ? '<dt>Blood</dt><dd>One unit held until ' + esc(clock(r.bloodHoldUntil)) + '</dd>' : '') +
+        (r.feedback ? '<dt>Feedback</dt><dd>' + esc(r.feedback) + '</dd>' : '') + '</dl></div>';
       html += '<div class="panel"><h2>Case timeline</h2><ol class="tl">' + (r.events || []).map(function (e) {
         var mins = Math.round((e.at - r.createdAt) / 60000);
         return '<li><b>' + esc(clock(e.at)) + '</b> <span class="plus">+' + mins + ' min</span><br>' + esc(e.text) + '</li>';
       }).join('') + '</ol></div>';
     }
+    html += kpiPanel();
     var rows = ST.facilities.filter(function (f) { return f.kind === 'hospital' || f.kind === 'fallback'; }).map(function (f) {
       var st = MK.engine.facilityStatus(f, D, typeOf().id);
-      var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">No check-in</span>' : '<span class="pill bad">Not ready</span>';
+      var pill = st === 'ready' ? '<span class="pill ok">Ready</span>' : st === 'uncertain' ? '<span class="pill warn">No check-in</span>' : st === 'full' ? '<span class="pill bad">Full</span>' : '<span class="pill bad">Not ready</span>';
       return '<dt>' + esc(f.short) + '</dt><dd>' + pill + ' ' + f.km + ' km</dd>';
     }).join('');
     html += '<div class="panel"><h2>Tonight’s readiness (' + esc(typeOf().short.toLowerCase()) + ')</h2><dl class="kv">' + rows + '</dl>' + (typeOf().review ? '<p class="sub2">' + esc(typeOf().review) + '</p>' : '') + '</div>';
@@ -194,6 +216,19 @@
     $('side').innerHTML = html;
     $('skip').hidden = !(r && r.state === 'sent');
     document.querySelectorAll('[data-scn]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.scn === ST.scenario)); });
+  }
+
+  function kpiPanel() {
+    var k = MK.engine.kpis(ST.refs || [], ST.facilities, D), B = D.baseline;
+    function tile(label, val, unit, base) {
+      return '<div class="kp"><span class="kv2">' + (val == null ? '–' : esc(val) + '<small>' + unit + '</small>') + '</span><span class="kl">' + esc(label) + '</span>' + (base ? '<span class="kb">' + esc(base) + '</span>' : '') + '</div>';
+    }
+    return '<div class="panel"><h2>District KPIs (this session)</h2><div class="kps">' +
+      tile('Decision to hospital door (est.)', k.doorMin, ' min', 'Today: ' + B.doorMin + ' min') +
+      tile('First hospital asked was ready', k.firstReadyPct, '%', 'Today: ' + B.firstReadyPct + '%') +
+      tile('Hospital reply time', k.replySec, ' s', 'Limit: 120 s') +
+      tile('Not ready on arrival', k.checked ? k.mismatches : null, ' of ' + k.checked, '') +
+      '</div><p class="sub2">Today = our simulation of 20,000 synthetic night emergencies. Door time = time to a confirmed hospital plus road ETA.</p></div>';
   }
 
   /* ---------- automatic call screen ---------- */
@@ -226,11 +261,17 @@
   }
   function menuSheet() {
     var r = cur();
+    var idle = !r || r.state === 'closed';
+    var dr = ST.drill && !ST.drill.done;
     openSheet('<h3>Demo menu</h3>' +
+      '<button class="opt" data-act="auto"><span>▶ Auto-play the Lakshmi case<small>The whole referral plays by itself across all phones, about 1 minute</small></span></button>' +
       (r && r.state === 'sent' ? '<button class="opt" data-act="skip"><span>Skip 2 minutes<small>See what happens when the hospital stays silent</small></span></button>' : '') +
       '<button class="opt" data-scn="confirms"><span>New case: hospital confirms</span></button>' +
       '<button class="opt" data-scn="nobody"><span>New case: no hospital ready<small>Nobody passes the checklist tonight</small></span></button>' +
       ((!r || r.state === 'closed' || r.state === 'confirmed') ? '<button class="opt" data-act="miss"><span>Demo: DH Devgarh misses the night check-in<small>It turns Uncertain, gets a reminder, district is told</small></span></button>' : '') +
+      (idle && !dr ? '<button class="opt" data-act="drill"><span>Demo: weekly mock drill<small>Every labour room phone gets a practice referral; district sees who answered</small></span></button>' : '') +
+      (dr ? '<button class="opt" data-act="drill-report"><span>Send the drill result to the district now<small>Hospitals that did not reply show as no reply</small></span></button>' : '') +
+      ((!r || ['closed', 'confirmed'].indexOf(r.state) !== -1) && !fac('dh').full ? '<button class="opt" data-act="full-dh"><span>Demo: DH Devgarh is full for 2 hours<small>Diversion: the next referral skips it</small></span></button>' : '') +
       '<button class="opt" data-act="report"><span>Demo: monthly readiness report to district<small>Which hospital was not ready, how often, and why</small></span></button>' +
       '<button class="opt" data-act="help"><span>How to test</span></button>' +
       '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
@@ -252,7 +293,8 @@
       '<li><b>Switch phone</b> (bar under the header) to <b>DH Devgarh</b> and tap <b>1 All ready</b>. Then look at the Doctor, Family, 108 driver and 108 EMT phones.</li>' +
       '<li><b>Try more</b> from the ⋮ menu: Skip 2 minutes (no reply, automatic call, reroute), No hospital ready, or a missed check-in. Try <b>Fits or eclampsia</b>: it goes to SDH Kheri because DH has no HDU bed tonight.</li>' +
       '<li><b>Close the loop:</b> on arrival the nurse says if everything was really ready (a No alerts the district), the hospital marks discharge, and the PHC and ASHA get the back-referral. The side panel shows the case timeline.</li>' +
-      '<li><b>Quick keyword:</b> type <b>BLEED B+</b> or <b>FITS O+</b> instead of Hi, like an SMS.</li></ol>' +
+      '<li><b>Quick keyword:</b> type <b>BLEED B+</b> or <b>FITS O+</b> instead of Hi, like an SMS. No internet? Tap <b>📞 Missed call</b>: Matri-Kavach calls back and the nurse presses 1 or 2.</li>' +
+      '<li><b>Short on time?</b> Tap <b>▶ Auto-play</b> and watch the whole case run across every phone. The side panel shows the district KPIs against today’s 131 minutes.</li></ol>' +
       '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
   }
   function typeSheet() {
@@ -297,6 +339,37 @@
 
   function show(phone) { if (root.scrollY > 0) root.scrollTo(0, 0); VIEW = phone; SEEN[VIEW] = countIn(VIEW); closeSheet(); LAST = ''; render(); var el = $('msgs'); el.scrollTop = el.scrollHeight; try { root.localStorage.setItem('mk-chat-view', phone); } catch (e) {} }
 
+  /* ---------- auto-play: the whole Lakshmi case, step by step, across the phones ---------- */
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function idleAct(action, args) {
+    return (function tryIt(n) { if (!BUSY) return act(action, args); if (n > 40) return Promise.resolve(); return wait(150).then(function () { return tryIt(n + 1); }); })(0);
+  }
+  function autoPlay() {
+    if (AUTO) return;
+    var P = D.mother, form = {};
+    D.forms.bleeding.forEach(function (q) { form[q.id] = q.options ? q.options[0] : q.value || ''; });
+    var patient = Object.assign({ name: P.name, age: String(P.age), blood: P.bloodGroup, contact: P.contact, informed: 'Yes' }, form);
+    var steps = [
+      ['nurse', 'Night, PHC Rampur. Lakshmi is bleeding heavily after delivery. Nurse Kavitha starts a referral.', function () { ECHO = {}; return idleAct('reset', { scenario: 'confirms' }).then(function () { return idleAct('nurseText', { text: 'Hi' }); }); }],
+      ['nurse', 'She picks Heavy bleeding. The checklist was signed by the clinical partner.', function () { return idleAct('startReferral', { typeId: 'bleeding' }); }],
+      ['nurse', 'She sends the facts. Matri-Kavach skips CHC Sonpur (no anaesthetist tonight) and proposes DH Devgarh, 21 km.', function () { return idleAct('details', { patient: patient }); }],
+      ['nurse', 'She taps SEND. The 108 ambulance leaves at once; the hospital confirms on the way.', function () { return idleAct('send', {}); }],
+      ['dh', 'DH Devgarh gets the INCOMING alert. Sister Anjali taps 1 All ready.', function () { echo('dh', '1 All ready'); return idleAct('hospitalReply', { kind: 'all-ready' }); }],
+      ['bloodbank', 'At the same moment the blood bank holds one B+ unit, and the doctor, family, driver and EMT are told.', function () { return Promise.resolve(); }],
+      ['dh', 'The labour room team is ready at the door.', function () { echo('dh', 'Team ready at the door'); return idleAct('teamReady', {}); }],
+      ['nurse', 'She arrives. The nurse confirms everything was really ready.', function () { return idleAct('arrived', { value: 'Yes' }).then(function () { return idleAct('readyCheck', { value: 'Yes' }); }).then(function () { return idleAct('outcome', { value: 'Delivered' }); }); }],
+      ['asha', 'Days later DH marks her discharged. The PHC and ASHA get the day 3, 7 and 42 visits.', function () { echo('dh', 'Discharged home'); return idleAct('discharge', {}); }],
+      ['nurse', 'DH sends feedback: the referral was on time. Look at the case timeline and the KPIs in the side panel.', function () { echo('dh', '1 On time'); return idleAct('feedback', { value: '1' }); }]
+    ];
+    AUTO = { i: 0, total: steps.length, text: 'Starting', stop: false };
+    (function run(i) {
+      if (AUTO.stop || i >= steps.length) { var done = !AUTO.stop; AUTO = null; LAST = ''; render(); if (done) note('Auto-play finished. Scroll the side panel for the case timeline and KPIs, or tap Reset to try it yourself.'); return; }
+      var st = steps[i];
+      AUTO.i = i + 1; AUTO.text = st[1];
+      st[2]().then(function () { show(st[0]); return wait(i === 0 ? 2500 : 3800); }).then(function () { run(i + 1); });
+    })(0);
+  }
+
   function bind() {
     document.addEventListener('click', function (e) {
       var p = e.target.closest('[data-phone]'); if (p) { show(p.dataset.phone); return; }
@@ -338,6 +411,16 @@
       else if (a === 'discharge') { echo(VIEW, 'Discharged home'); act('discharge', {}); }
       else if (a === 'report') { closeSheet(); act('monthlyReport', {}).then(function () { show('district'); }); }
       else if (a === 'outcome') act('outcome', { value: v });
+      else if (a === 'fb') { echo(VIEW, { 1: '1 On time', 2: '2 Should have come earlier', 3: '3 Could have been managed at the PHC' }[v]); act('feedback', { value: v }); }
+      else if (a === 'full') { echo(VIEW, v === '1' ? 'FULL' : 'OPEN'); act('setFull', { facility: VIEW, on: v === '1' }); }
+      else if (a === 'full-dh') { closeSheet(); act('setFull', { facility: 'dh', on: true }).then(function () { show('dh'); }); }
+      else if (a === 'drill') { closeSheet(); act('drill', {}).then(function () { show('dh'); }); }
+      else if (a === 'drill-report') { closeSheet(); act('drillReport', {}).then(function () { show('district'); }); }
+      else if (a === 'drillok') { echo(VIEW, '1'); act('drillReply', { facility: VIEW }); }
+      else if (a === 'mcall') act('missedCall', {});
+      else if (a === 'ncall') act('nurseCall', { digit: v });
+      else if (a === 'auto') { closeSheet(); autoPlay(); }
+      else if (a === 'auto-stop') { if (AUTO) AUTO.stop = true; }
     });
     setInterval(countdown, 500);
   }
@@ -356,9 +439,12 @@
         return;
       }
     }
-    var ha = hospitalAfter(VIEW);
-    if (ha && ha[0] === 'team' && /^team/i.test(text)) { echo(VIEW, text); act('teamReady', {}); return; }
-    if (ha && ha[0] === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', {}); return; }
+    var ha = hospitalAfter(VIEW), h0 = ha[0] && ha[0][0];
+    if (h0 === 'team' && /^team/i.test(text)) { echo(VIEW, text); act('teamReady', {}); return; }
+    if (h0 === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', {}); return; }
+    if (h0 === 'fb' && /^[123]\b/.test(text)) { echo(VIEW, text); act('feedback', { value: text[0] }); return; }
+    if (h0 === 'drillok' && /^1\b/.test(text)) { echo(VIEW, text); act('drillReply', { facility: VIEW }); return; }
+    if (isHospital(VIEW) && /^(full|open)\b/i.test(text)) { echo(VIEW, text); act('setFull', { facility: VIEW, on: /^full/i.test(text) }); return; }
     echo(VIEW, text); LAST = ''; render();
   }
   function bindComposer() {
