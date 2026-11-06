@@ -327,16 +327,32 @@
       (ROLE ? '' : '<button class="opt" data-act="settings"><span>⚙ District settings and hospital editor<small>Ask 2 hospitals at once, reply time, Hindi, SMS, supply idea, add a hospital</small></span></button>') +
       (ROLE ? '' : '<button class="opt" data-act="home-open"><span>🏠 ASHA: home emergency with location<small>The mother is at home, not at the PHC</small></span></button>') +
       '<button class="opt" data-act="' + (ROLE ? 'logout' : 'login') + '"><span>' + (ROLE ? '🔓 Log out of this role' : '🔐 Log in as one role (demo OTP)<small>Phone number = role. This screen then shows only that person’s messages</small>') + '</span></button>' +
+      '<button class="opt" data-act="lists"><span>📋 Emergency checklists<small>All 6 lists in plain words, and who signed each one</small></span></button>' +
       '<button class="opt" data-act="help"><span>How to test</span></button>' +
       '<button class="opt" data-act="reset"><span>Reset this chat</span></button>' +
       '<a class="opt" href="' + esc($('classic').getAttribute('href')) + '"><span>Open the dashboard view</span></a>');
   }
+  // Every emergency checklist on one screen, in plain words, with who signed it.
+  function listsSheet() {
+    var byId = {}; ALL_ITEMS.forEach(function (it) { byId[it.id] = it.label; });
+    var cards = D.emergencyTypes.filter(function (t) { return t.items || t.draft; }).map(function (t, n) {
+      var items = t.items ? t.items.map(function (id) { return byId[id]; }) : t.draft;
+      return '<div class="cl"><h4>' + (n + 1) + '. ' + esc(t.label) + '</h4>' +
+        '<p class="st ' + (t.signed ? 'ok' : 'wait') + '">' + (t.signed ? '✓ ' + esc(t.review) : '… Waiting for M Gufran to sign. Not routed: the nurse calls the doctor.') + '</p>' +
+        '<ol>' + items.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>' +
+        (t.safety ? '<p class="sub2">' + esc(t.safety) + '</p>' : '') + '</div>';
+    }).join('');
+    openSheet('<h3>Emergency checklists</h3><p class="sub2">A hospital is Ready for an emergency only when every item on its list is Yes in tonight’s check-in. These are readiness checks, not treatment advice.</p>' + cards);
+  }
   function checkinSheet(id) {
     var f = fac(id);
     if (!CK || CK.facility !== id) CK = { facility: id, items: f.checkin ? Object.assign({}, f.checkin.items) : {} };
-    var rows = ALL_ITEMS.map(function (it) {
-      var v = CK.items[it.id];
-      return '<div class="ck"><span>' + esc(it.label) + '</span><span class="yn"><button data-act="ck" data-v="' + it.id + ':1" aria-pressed="' + (v === true) + '">Yes</button><button data-act="ck" data-v="' + it.id + ':0" aria-pressed="' + (v === false) + '">No</button></span></div>';
+    var rows = (D.itemGroups || ['']).map(function (g) {
+      var its = ALL_ITEMS.filter(function (it) { return !D.itemGroups || it.group === g; });
+      return (g ? '<p class="ckh">' + esc(g) + '</p>' : '') + its.map(function (it) {
+        var v = CK.items[it.id];
+        return '<div class="ck"><span>' + esc(it.label) + '</span><span class="yn"><button data-act="ck" data-v="' + it.id + ':1" aria-pressed="' + (v === true) + '">Yes</button><button data-act="ck" data-v="' + it.id + ':0" aria-pressed="' + (v === false) + '">No</button></span></div>';
+      }).join('');
     }).join('');
     var nurses = f.checkin && f.checkin.nurses != null ? f.checkin.nurses : f.nurses;
     var nsel = '<label class="fl">Nurses on duty tonight<select id="ck-nurses">' + [0, 1, 2, 3, 4, 5, 6, 8, 10].map(function (n) { return '<option' + (n === nurses ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></label>';
@@ -407,7 +423,7 @@
   }
   function typeSheet() {
     openSheet('<h3>Choose emergency</h3>' + D.emergencyTypes.map(function (t, i) {
-      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? (t.review ? '<small>' + esc(t.review) + '</small>' : '') : '<small>Checklist not reviewed yet: call the doctor</small>') + '</span><span class="radio"></span></button>';
+      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? (t.review ? '<small>' + esc(t.review) + '</small>' : '') : '<small>Checklist waiting for sign-off: call the doctor</small>') + '</span><span class="radio"></span></button>';
     }).join('') + '<button class="go" data-act="type-send">Send</button>');
   }
   function detailsSheet() {
@@ -460,7 +476,7 @@
     var patient = Object.assign({ name: P.name, age: String(P.age), blood: P.bloodGroup, contact: P.contact, informed: 'Yes' }, form);
     var steps = [
       ['nurse', 'Night, PHC Rampur. Lakshmi is bleeding heavily after delivery. Nurse Kavitha starts a referral.', function () { ECHO = {}; return idleAct('reset', { scenario: 'confirms' }).then(function () { return idleAct('nurseText', { text: 'Hi' }); }); }],
-      ['nurse', 'She picks Heavy bleeding. The checklist was signed by the clinical partner.', function () { return idleAct('startReferral', { typeId: 'bleeding' }); }],
+      ['nurse', 'She picks Heavy bleeding. The checklist was signed by M Gufran, the clinical partner.', function () { return idleAct('startReferral', { typeId: 'bleeding' }); }],
       ['nurse', 'She sends the facts. Matri-Kavach skips CHC Sonpur (no anaesthetist tonight) and proposes DH Devgarh, 21 km.', function () { return idleAct('details', { patient: patient }); }],
       ['nurse', 'She taps SEND. The 108 ambulance leaves at once; the hospital confirms on the way.', function () { return idleAct('send', {}); }],
       ['dh', 'DH Devgarh gets the INCOMING alert. Sister Anjali taps 1 All ready.', function () { echo('dh', '1 All ready'); return idleAct('hospitalReply', { kind: 'all-ready' }); }],
@@ -523,6 +539,7 @@
       }
       else if (a === 'details-clear') document.querySelectorAll('.sheet input').forEach(function (el) { el.value = ''; });
       else if (a === 'settings') settingsSheet();
+      else if (a === 'lists') listsSheet();
       else if (a === 'set') { var p2 = v.split(':'), val = p2[1] === 'true' ? true : p2[1] === 'false' ? false : /^\d+$/.test(p2[1]) ? Number(p2[1]) : p2[1]; var o = {}; o[p2[0]] = val; act('setSettings', o).then(settingsSheet); }
       else if (a === 'h-add') { var hn = $('h-name'), hk = $('h-km'); act('addHospital', { name: hn ? hn.value : '', km: hk ? Number(hk.value) : 0 }).then(settingsSheet); }
       else if (a === 'h-del') act('removeHospital', { id: v }).then(settingsSheet);

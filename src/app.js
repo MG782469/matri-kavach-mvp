@@ -283,7 +283,7 @@
       kt('Decision to hospital door (estimated)', k.doorMin, ' min', 'Today: ' + B.doorMin + ' min (simulation)') +
       kt('First hospital asked was ready', k.firstReadyPct, '%', 'Today: ' + B.firstReadyPct + '% (simulation)') +
       kt('Not ready on arrival', k.checked ? k.mismatches + ' of ' + k.checked : null, '', 'Caught by the nurse arrival check') +
-      '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>Fits / eclampsia list: reviewed by clinical partner, pending obstetrician validation.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>Last check</th><th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
+      '<div class="card"><div class="lbl">Readiness tonight, from one shared shift check-in</div><p>All five checklists signed by M Gufran (typed name, 4 Nov 2026). Obstetrician validation needed before a pilot.</p><div style="overflow-x:auto"><table><tr><th>Hospital</th>' + TYPES.map(function (t) { return '<th>' + esc(t.short) + '</th>'; }).join('') + '<th>Last check</th><th>ETA</th><th>Blood</th></tr>' + rows + '</table></div></div>' +
       '<div class="card"><div class="lbl">Referrals in this session</div><ul>' + list + '</ul></div>' + timelineCard() + monthCard();
   }
 

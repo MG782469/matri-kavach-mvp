@@ -209,12 +209,12 @@ test('role login: code, token, own messages only, and actions limited to the rol
   } finally { h.server.close(); }
 });
 
-test('draft emergencies are never routed: the nurse sees the draft list and is told to call the doctor', async () => {
+test('an unsigned emergency (newborn) is never routed: the nurse sees the proposed list and is told to call the doctor', async () => {
   const h = await boot();
   try {
-    const r = await h.act('startReferral', { typeId: 'aph' });
+    const r = await h.act('startReferral', { typeId: 'newborn' });
     assert.strictEqual(r.cur, null);
-    assert.ok(r.chat.some((m) => /Draft checklist for clinical review/.test(m.text) && /Call the doctor now/.test(m.text)));
+    assert.ok(r.chat.some((m) => /waiting for M Gufran to sign/.test(m.text) && /Call the doctor now/.test(m.text)));
   } finally { h.server.close(); }
 });
 
@@ -225,5 +225,28 @@ test('family by SMS when set: the family message goes on the SMS channel', async
     await toSent(h);
     const r = await h.act('hospitalReply', { kind: 'all-ready' });
     assert.strictEqual(r.outbox.find((o) => o.role === 'family').channel, 'sms');
+  } finally { h.server.close(); }
+});
+
+test('signed checklists route each emergency to a hospital that passes its own list', () => {
+  const D = require('../src/data.js'); const E = require('../src/engine.js');
+  const first = (id) => E.candidatesFor(D.facilities, D, [], id, 'B+')[0].id;
+  assert.strictEqual(first('obstructed'), 'dh');
+  assert.strictEqual(first('aph'), 'dh');
+  assert.strictEqual(first('sepsis'), 'sdh'); // DH has no HDU bed tonight
+  D.emergencyTypes.filter((t) => t.signed).forEach((t) => {
+    assert.ok(/M Gufran/.test(t.review), t.id + ' names who signed');
+    assert.ok(D.forms[t.id], t.id + ' has its own nurse form');
+    t.items.forEach((i) => assert.ok(D.checklistItems.concat(D.extraItems).some((x) => x.id === i), t.id + ' item ' + i));
+  });
+  assert.strictEqual(D.emergencyTypes.find((t) => t.id === 'newborn').signed, false);
+});
+
+test('APH referral shows the no-vaginal-examination safety line; sepsis does not alert the blood bank', async () => {
+  const h = await boot();
+  try {
+    const r = await h.act('startReferral', { typeId: 'aph' });
+    assert.ok(r.cur);
+    assert.ok(r.chat.some((m) => /no vaginal examination until placenta praevia/.test(m.text)));
   } finally { h.server.close(); }
 });

@@ -7,7 +7,7 @@
     quick: 'Quick referral from keyword: [type], blood group [group]. Send the other details when you can.',
     busy: 'A referral is in progress. Please use the buttons above.',
     pickType: 'Tap one emergency type:',
-    typeNotSigned: 'The checklist for this type is not reviewed yet. Call the doctor now. For this demo, use heavy bleeding or fits.',
+    typeNotSigned: 'This emergency has no signed checklist yet. Call the doctor now.',
     reviewNote: 'Checklist status: [review].',
     details: 'Patient details. You can send these now or later.',
     proposed: 'Sending to [hospital], [km] km, about [eta] min. Tap SEND to confirm, or CHANGE to pick another.',
@@ -77,7 +77,7 @@
     driverHome: '108 trip: pick up at [place] (home, location shared by the ASHA). Go to [hospital], [km] km. The hospital is confirming now.',
     // SMS fallback
     smsNote: '(SMS, the family has no WhatsApp)',
-    draftNote: 'Draft checklist for clinical review (not reviewed yet, not routed): [items]. Call the doctor now.'
+    draftNote: 'Proposed checklist, waiting for M Gufran to sign (not routed yet): [items]. Call the doctor now.'
   };
   /* Hindi texts for the nurse chat and the family. Written by the tech team; pending review by M Gufran before any real use.
      Placeholders stay the same. Keys without a Hindi text fall back to English. */
@@ -85,7 +85,7 @@
     hello: 'नमस्ते! यह मातृ-कवच है, PHC रामपुर के लिए आपातकालीन रेफ़रल सहायता। रेफ़रल शुरू करने के लिए Choose emergency दबाएँ।',
     sayHi: 'नया आपातकालीन रेफ़रल शुरू करने के लिए Hi लिखें, या BLEED B+ जैसा छोटा शब्द भेजें।',
     busy: 'एक रेफ़रल चल रहा है। कृपया ऊपर दिए बटन इस्तेमाल करें।',
-    typeNotSigned: 'इस आपातकाल की चेकलिस्ट की अभी समीक्षा नहीं हुई है। अभी डॉक्टर को फ़ोन करें।',
+    typeNotSigned: 'इस आपातकाल की चेकलिस्ट पर अभी हस्ताक्षर नहीं हुए हैं। अभी डॉक्टर को फ़ोन करें।',
     reviewNote: 'चेकलिस्ट की स्थिति: [review]।',
     details: 'मरीज़ का विवरण। आप इसे अभी या बाद में भेज सकती हैं।',
     quick: 'शब्द से तुरंत रेफ़रल: [type], ब्लड ग्रुप [group]। बाकी विवरण जब हो सके भेजें।',

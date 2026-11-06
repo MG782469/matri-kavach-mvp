@@ -161,3 +161,11 @@ a.opt { color: var(--ink); text-decoration: none; }
 .sheet .fl select { width: 100%; }
 .sheet .ck small { font-size: 12px; }
 .sheet .yn button[disabled], .sheet .opt[disabled] { opacity: .5; }
+/* Check-in headings and the emergency checklists sheet */
+.sheet .ckh { margin: 14px 0 0; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.sheet .cl { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.sheet .cl h4 { margin: 0 0 4px; font-size: 15px; }
+.sheet .cl .st { margin: 0 0 6px; font-size: 12.5px; font-weight: 600; }
+.sheet .cl .st.ok { color: var(--mk-ok); }
+.sheet .cl .st.wait { color: var(--mk-warn); }
+.sheet .cl ol { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.5; }

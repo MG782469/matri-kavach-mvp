@@ -117,6 +117,7 @@ async function startReferral(s, ctx, a) {
   setCur(s, Object.assign(E.startReferral(t.id, ctx.now()), a.origin ? { origin: a.origin } : {}));
   s.step = 'details'; say(s, 'nurse', t.label);
   if (t.review) say(s, 'bot', tr(s, 'reviewNote', { review: t.review }));
+  if (t.safety) say(s, 'bot', t.safety);
   say(s, 'bot', tr(s, 'details'));
   return s;
 }
@@ -193,7 +194,7 @@ async function supplyIdea(s, ctx) {
     .filter((x) => x.miss && x.miss.length && x.miss.every((m) => movable.includes(m)))
     .sort((a, b) => a.f.km - b.f.km)[0];
   if (!near) return;
-  const labels = near.miss.map((m) => (ALL_ITEMS.find((it) => it.id === m) || { label: m }).label.split(/[,:(]/)[0].trim().toLowerCase());
+  const labels = near.miss.map((m) => { const it = ALL_ITEMS.find((x) => x.id === m) || { label: m }; return it.short || it.label.split(/[,:(]/)[0].trim().toLowerCase(); });
   setCur(s, Object.assign({}, s.cur, { supplyIdea: near.f.id }));
   addEvent(s, ctx, 'Supply idea sent to the district (advisory only): ' + near.f.short + ' lacks only ' + labels.join(', '));
   await tell(s, ctx, 'district', 'District officer', M.fill('supplyIdea', { hospital: near.f.short, items: labels.join(', '), type: typeOf(s).short.toLowerCase(), from: dest.short }));

@@ -287,7 +287,7 @@ test('fits / eclampsia referral: own form, own alert text, review label, no bloo
   const h = await boot();
   try {
     let r = (await h.act(SID, 'startReferral', { typeId: 'fits' })).body;
-    assert.ok(r.chat.some((m) => /pending obstetrician validation/.test(m.text)));
+    assert.ok(r.chat.some((m) => /Signed by M Gufran/.test(m.text)));
     r = (await h.act(SID, 'details', { patient: { name: 'Sunita', age: '22', blood: 'O+', contact: '98XXXXXX22', fits: '2', lastfit: '22:10', bp: '168/112', weeks: '34 weeks', mgso4: 'Yes', antihtn: 'Yes', iv: 'Yes' } })).body;
     assert.strictEqual(r.cur.proposal, 'sdh');
     assert.strictEqual(r.cur.patient.bp, '168/112');
@@ -302,14 +302,14 @@ test('fits / eclampsia referral: own form, own alert text, review label, no bloo
     const page = await (await fetch(h.base + link)).text();
     assert.match(page, /Latest BP/);
     assert.match(page, /168\/112/);
-    assert.match(page, /pending obstetrician validation/);
+    assert.match(page, /Obstetrician validation needed/);
   } finally { h.server.close(); }
 });
 
-test('obstructed labour is still blocked: the nurse is told to call the doctor', async () => {
+test('newborn emergency is still blocked: the nurse is told to call the doctor', async () => {
   const h = await boot();
   try {
-    const r = (await h.act(SID, 'startReferral', { typeId: 'obstructed' })).body;
+    const r = (await h.act(SID, 'startReferral', { typeId: 'newborn' })).body;
     assert.strictEqual(r.cur, null);
     assert.match(r.chat[r.chat.length - 1].text, /Call the doctor/);
   } finally { h.server.close(); }
@@ -337,7 +337,7 @@ test('shared shift check-in: saving it changes readiness for every emergency typ
     const items = Object.fromEntries(require('../server/session.js').ALL_ITEMS.map((i) => [i.id, true]));
     let r = (await h.act(SID, 'checkin', { facility: 'dh', items })).body;
     const msg = r.outbox.filter((o) => o.role === 'dh').pop().text;
-    assert.match(msg, /13 Yes, 0 No/);
+    assert.match(msg, /17 Yes, 0 No/);
     assert.match(msg, /Heavy bleeding, Fits \/ eclampsia/);
     await h.act(SID, 'startReferral', { typeId: 'fits' });
     r = (await h.act(SID, 'details', { patient: { name: 'S', age: '22', blood: 'O+' } })).body;
