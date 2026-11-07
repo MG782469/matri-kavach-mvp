@@ -172,6 +172,13 @@ function createApp(opts = {}) {
         return;
       }
       const c = s.cur;
+      /* WhatsApp nurse: Hi first asks the language; "Add details" asks for the one-line patient details. */
+      if (isRole('nurse')) {
+        const lg = body.match(/^(?:lang\s*(en|hi)|(english|hindi|हिंदी|हिन्दी)(?:\s*\(hindi\))?)$/i);
+        if (lg) { s.settings.lang = /^(en|english)$/i.test(lg[1] || lg[2]) ? 'en' : 'hi'; body = 'Hi'; }
+        else if (S.GREETING.test(body) && (!c || s.step === 'done')) { info.role = 'nurse'; reply = M.T.langAsk; return; }
+        if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = M.fill('detailsAsk', {}, s.settings.lang); return; }
+      }
       /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
       const named = S.refInText(s, body);
       const hospIds = s.facilities.filter((f) => (f.kind === 'hospital' || f.kind === 'fallback') && isRole(f.id)).map((f) => f.id);

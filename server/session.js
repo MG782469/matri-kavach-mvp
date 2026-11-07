@@ -610,7 +610,7 @@ async function tickOne(s, ctx) {
   return s;
 }
 
-const GREETING = /^(hi+|hello+|hey+|hii+|namaste|namaskar|start|menu)\b/i;
+const GREETING = /^(hi+e*|hy+|hello+|hel+o|hlo+|hey+|namaste|namaskar|start|menu)\b/i;
 
 /* The nurse types in the chat. "Hi" (or hello, namaste) opens the menu, like any WhatsApp business bot. */
 async function nurseText(s, ctx, a) {
@@ -690,7 +690,7 @@ async function waDetails(s, ctx, a) {
   setCur(s, Object.assign({}, c, { patient: p }));
   const who = [p.name, p.age && p.age + ' years', p.blood && 'blood group ' + p.blood].filter(Boolean).join(', ');
   say(s, 'nurse', a.text);
-  say(s, 'bot', M.fill('waDetails', { who, informed: p.informed || 'Not recorded' }));
+  say(s, 'bot', tr(s, 'waDetails', { who, informed: p.informed || 'Not recorded' }));
   addEvent(s, ctx, 'Details sent on WhatsApp: ' + who);
   const hid = s.step === 'proposed' ? null : s.cur.confirmed || s.cur.destination || (['sent', 'ivr', 'confirmed', 'fallback'].includes(s.cur.state) ? s.cur.proposal : null);
   if (hid) {
@@ -1057,5 +1057,5 @@ function roleView(view, role) {
     drill: view.drill });
 }
 
-module.exports = { emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+module.exports = { GREETING, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
   loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById, isDetailsText, waCheckin, waCheckinList, waStatus };

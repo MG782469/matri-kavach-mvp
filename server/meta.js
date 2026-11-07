@@ -46,22 +46,28 @@ function createMeta(opts = {}) {
     if (/^INCOMING|^URGENT/.test(text)) {
       return buttons(text, [{ id: '1', title: '1 All ready' }, { id: '2 15', title: '2 Ready in 15 min' }, { id: '3', title: '3 Not available' }]);
     }
-    // Emergency list after Hi
-    const tl = text.match(/^([\s\S]*?)\s*On WhatsApp, reply with a number: [\s\S]*$/);
+    // Language choice on the first Hi
+    if (/Choose language \/ भाषा चुनें\.$/.test(text)) {
+      return buttons(text, [{ id: 'LANG EN', title: 'English' }, { id: 'LANG HI', title: 'हिंदी (Hindi)' }]);
+    }
+    // Emergency list after Hi (English or Hindi)
+    const tl = text.match(/^([\s\S]*?)\s*(?:On WhatsApp, reply with a number: |WhatsApp पर नंबर भेजें: )[\s\S]*$/);
     if (tl && TYPES.length) {
-      const body = tl[1].replace(/ Tap Choose emergency to start a referral\./, '') + '\n\nTap *Choose emergency* below. Each list is signed by our clinical partner.';
+      const hi = /नमस्ते/.test(tl[1]);
+      const body = tl[1].replace(/ Tap Choose emergency to start a referral\./, '').replace(/ रेफ़रल शुरू करने के लिए Choose emergency दबाएँ।/, '') +
+        (hi ? '\n\nनीचे *Choose emergency* दबाएँ। हर सूची पर हमारे क्लिनिकल पार्टनर के हस्ताक्षर हैं।' : '\n\nTap *Choose emergency* below. Each list is signed by our clinical partner.');
       return list(body, TYPES.map((t, i) => ({ id: String(i + 1), title: (i + 1) + ' ' + (t.short || t.label), desc: t.label })), 'Choose emergency');
     }
-    if (/Tap SEND to confirm, or CHANGE to pick another\./.test(text)) {
-      return buttons(text.replace('Tap SEND to confirm, or CHANGE to pick another.', 'Tap *SEND* to confirm, or *CHANGE* to pick another.'),
-        [{ id: 'SEND', title: '✅ SEND' }, { id: 'CHANGE', title: '🔁 CHANGE' }]);
+    if (/Tap SEND to confirm, or CHANGE to pick another\.|पुष्टि के लिए SEND दबाएँ/.test(text)) {
+      return buttons(text.replace('Tap SEND to confirm, or CHANGE to pick another.', 'Tap *SEND* to confirm, *CHANGE* to pick another, or *Add details* for name, age and blood group.'),
+        [{ id: 'SEND', title: '✅ SEND' }, { id: 'CHANGE', title: '🔁 CHANGE' }, { id: 'DETAILS', title: '📝 Add details' }]);
     }
     // Numbered choices at the end of the last line: "Tap: 1 Yes, 2 No, 3 Transferred." / "Outcome: 1 Delivered, 2 Other."
     const lines = text.split('\n'); const last = lines[lines.length - 1];
-    const at = last.search(/(?:Tap:?|Tap one\.|Outcome:|number:)\s*1\s+\S/);
+    const at = last.search(/(?:Tap:?|Tap one\.|Outcome:|number:|दबाएँ:|नतीजा:)\s*1\s+\S/);
     if (at >= 0) {
-      const tail = last.slice(at).replace(/^(?:Tap:?|Tap one\.|Outcome:|number:)\s*/, '');
-      const opts = tail.split(/[.,]\s+(?=\d+\s)/).map((x) => x.trim().replace(/\.$/, '').match(/^(\d+)\s+(.+)$/)).filter(Boolean).map((m) => ({ id: m[1], title: m[1] + ' ' + m[2], desc: m[2] }));
+      const tail = last.slice(at).replace(/^(?:Tap:?|Tap one\.|Outcome:|number:|दबाएँ:|नतीजा:)\s*/, '');
+      const opts = tail.split(/[.,]\s+(?=\d+\s)/).map((x) => x.trim().replace(/[.।]$/, '').match(/^(\d+)\s+(.+)$/)).filter(Boolean).map((m) => ({ id: m[1], title: m[1] + ' ' + m[2], desc: m[2] }));
       if (opts.length >= 2 && opts.length <= 10) {
         return opts.length <= 3 && opts.every((o) => o.title.length <= 20) ? buttons(text, opts) : list(text, opts);
       }

@@ -12,6 +12,8 @@
     secondCase: 'Note: you already have case [other] coming to you. Reply 1 only if you can also take this second mother.',
     pickType: 'Tap one emergency type:',
     typeList: 'On WhatsApp, reply with a number: [list]. Each list is signed by our clinical partner.',
+    langAsk: 'Namaste! This is Matri-Kavach, emergency referral help for PHC Rampur. Choose language / भाषा चुनें.',
+    detailsAsk: 'Send the patient details in one line: name, age, blood group, family told yes or no. Example: Lakshmi Devi, 24, B+, family yes',
     typeNumber: 'Emergency chosen: [type]. Optional: send patient details in one line, for example: Lakshmi Devi, 24, B+, family yes. You can also send them after SEND.',
     typeNotSigned: 'This emergency has no signed checklist yet. Call the doctor now.',
     reviewNote: 'Checklist status: [review].',
@@ -96,6 +98,9 @@
   /* Hindi texts for the nurse chat and the family. Written by the tech team; pending review by M Gufran before any real use.
      Placeholders stay the same. Keys without a Hindi text fall back to English. */
   var HI = {
+    typeNumber: 'आपातकाल चुना गया: [type]। चाहें तो मरीज़ का विवरण एक लाइन में भेजें, जैसे: Lakshmi Devi, 24, B+, family yes। SEND के बाद भी भेज सकती हैं।',
+    waDetails: 'विवरण सेव हुआ: [who]। परिवार को बताया: [informed]।',
+    detailsAsk: 'मरीज़ का विवरण एक लाइन में भेजें: नाम, उम्र, ब्लड ग्रुप, परिवार को बताया yes या no। उदाहरण: Lakshmi Devi, 24, B+, family yes',
     hello: 'नमस्ते! यह मातृ-कवच है, PHC रामपुर के लिए आपातकालीन रेफ़रल सहायता। रेफ़रल शुरू करने के लिए Choose emergency दबाएँ।',
     typeList: 'WhatsApp पर नंबर भेजें: [list]। हर सूची पर हमारे क्लिनिकल पार्टनर के हस्ताक्षर हैं।',
     sayHi: 'नया आपातकालीन रेफ़रल शुरू करने के लिए Hi लिखें, या BLEED B+ जैसा छोटा शब्द भेजें।',
