@@ -1,118 +1,207 @@
-# Matri-Kavach MVP
+# Matri-Kavach
 
-Route it. Ready it. Close it. Health-a-thon 2026, team InnoVerse (code I44UEW), Maternal Health track.
+**Every referred mother reaches a hospital that has said it is ready.**
 
-A referral routing service for maternal emergencies. A PHC nurse starts a heavy-bleeding referral, the system picks the nearest hospital whose doctor-signed checklist is all yes for this shift, tells the ambulance, asks the hospital to confirm within 2 minutes, calls the duty phone if there is no reply, reroutes if there is still no answer, and records the outcome. **All data is synthetic. No real hospital, patient or family is involved.**
+Matri-Kavach is a WhatsApp-first referral routing service for maternal emergencies in rural India. A PHC nurse taps the emergency, and the system does the rest. It picks the nearest hospital that is ready **tonight**, sends 108 at once, and gets the hospital to confirm while the mother is on the way. If nobody answers, it escalates automatically. It also gets the doctor, the blood bank and the family ready before she arrives.
 
-## For judges (no login)
+Built for **Health-a-thon 2026** by **Team InnoVerse** (code I44UEW).
 
-Open https://matri-kavach.onrender.com/chat (WhatsApp-style view, recommended) or the dashboard at https://matri-kavach.onrender.com/. Each visitor gets a private session that sends nothing to real phones. Tap *How to test* or *Auto-play* for a guided run.
+| | |
+|---|---|
+| **Live MVP** | https://matri-kavach-mvp.onrender.com (no login) |
+| **WhatsApp-style demo** | https://matri-kavach-mvp.onrender.com/chat |
+| **Real WhatsApp** | Live on Meta WhatsApp Cloud API (test number) |
+| **Tests** | 78 automated tests, `npm test` |
+| **Data** | Synthetic only. No real patient, hospital or family. |
 
-1. Nurse chat: pick *Heavy bleeding after delivery* (or type `BLEED B+`), fill the short form, then *SEND*.
-2. The proposal shows the hospital, the ETA and *Last readiness check: time, by whom*. That time comes from the hospital's latest saved shift check-in. A check-in older than 8 hours is shown as old and unconfirmed. A check-in is never shown as confirmed availability: only the hospital's reply for this case confirms.
-3. Hospital duty phone: tap *1 All ready*, or wait 2 minutes to see the automated call and the reroute.
-4. Doctor, blood bank, 108 driver and EMT, family and district chats show what each person gets.
-5. Nurse chat: arrival check, close the loop, discharge back-referral. The district view shows the KPIs.
+> The free server sleeps when idle, so the first load can take up to a minute.
 
-Use the *No hospital ready* scenario to see the fallback: "No hospital has confirmed readiness. District emergency escalation initiated. Medical college proposed as tertiary fallback, subject to clinical coordination and state referral protocols." The medical college is only proposed. Until it replies Yes, no doctor, family or blood bank message goes out and no arrival step is shown. If it says No, the district and clinicians coordinate the destination.
+---
 
-Emergency types: heavy bleeding after delivery (PPH), fits / eclampsia, obstructed labour, bleeding before delivery (APH), fever after delivery (sepsis) and newborn emergency. All six checklists are signed by M Gufran, our clinical partner (typed-name record 4 Nov 2026; hand-signed sheet for all six plus the shift check-in, 7 Nov 2026); an obstetrician (and a paediatrician for newborn) must still validate them before any pilot, and the app says so. "Other" is never routed: the nurse is told to call the doctor. Every nurse form ends with a free-text **Other details** box. On plain WhatsApp, Hi is answered with a numbered list of emergencies; the nurse replies with the number. See all lists in the ⋮ menu: **📋 Emergency checklists**.
+## The problem: referral ping-pong
 
-The call screen in `/chat` is labelled *Automated call (demo)*. The demo makes no encryption or security claim.
+In an emergency such as heavy bleeding after delivery (PPH), the mother is taken to the **nearest** facility, not the nearest **ready** one. If that facility has no anaesthetist, no free theatre or no blood tonight, she is referred again. Every extra move costs time she does not have.
 
-## More features (from the future-ideas list, added 6 Nov)
+- A review of 1,000+ maternal deaths found that women had passed through **about three facilities**, and **about a third died in transit**.
+- India's MMR is **87 per lakh live births** (SRS 2022-24). PPH is the leading direct cause.
+- 108 moves the mother fast. But nobody checks whether the hospital is ready tonight, and nobody tells it she is coming. These are delays 2 and 3 of the *three delays* model.
 
-All in the `/chat` view, mostly from the ⋮ menu. Synthetic data; labels say what is a demo or a mock.
+## What Matri-Kavach does
 
-- **Ask 2 hospitals at once** (on by default, can be switched off in District settings). SEND asks the nearest ready hospital and the next one as backup. The nearer one has priority: if it confirms, the backup gets CANCELLED. If the backup says yes first and the nearer one says no, or stays silent for the reply time, the backup is confirmed at once and the nearer one is told it is no longer needed. If the nearer one says no before the backup answers, the backup becomes first choice with a fresh timer and the next hospital is asked as the new backup.
-- **Blood stock per group**: each hospital's check-in can record units per blood group. A mother whose group is known is only routed to a hospital with a unit of her group (for example, B- goes to SDH Kheri because DH has none). Unknown group: the check-in's blood item decides.
-- **Nurses on duty** in the shift check-in; fewer than 2 alerts the district (staffing gap).
-- **Hindi** nurse chat (District settings). The family gets Hindi and English. The Hindi texts are written by the tech team and are pending review by the clinical partner.
-- **Hospital editor and settings**: add or remove a hospital (it starts Uncertain until it checks in), reply time 1, 2 or 3 minutes.
-- **District map**: synthetic positions, destination line and dashed backup line. No live ambulance tracking (108 owns GPS).
-- **ASHA home emergency**: the ASHA shares a (synthetic) village location; distances are counted from the home and 108 is sent at once.
-- **Supply idea**: OFF by default and not approved. When on, it only advises the district if a nearer hospital lacks only movable items (blood, drugs, IV fluids). Routing never changes because of it.
-- **Role logins (RBAC demo)**: phone number = role, one-time code shown on screen. Logged in, the screen and the API show only that role's messages and allow only that role's actions; the driver, family and district never get the mother's name.
-- **Six signed emergency checklists** from one shift check-in of 17 Yes/No items, grouped as Staff, Rooms and beds, Blood and drugs, Equipment and lab.
-- **SMS fallback** for a family without WhatsApp (real SMS needs a paid Twilio number). **ABDM / e-RaktKosh**: HFR IDs, the ABHA field and the e-RaktKosh stock fill are mocks, not connected.
-
-## Two mothers at the same time (added 7 Nov)
-
-- Every mother gets her own case ID and letter (Mother A, Mother B). The nurse sees one chip per open case at the top of her chat, taps a chip to switch, and taps **+ New mother** (or types NEW, or a keyword such as FITS O+) to start another referral. Open cases keep running: each has its own 2-minute timer, call and reroute.
-- Each mother gets her own 108 ambulance (Ambulance 1 and 2, phones `PHONE_DRIVER`/`PHONE_EMT` and `PHONE_DRIVER2`/`PHONE_EMT2`). If both are busy, the district is asked for the nearest free 108.
-- The driver message has the case ID, the pick-up (PHC or the ASHA's home location), the hospital and a Google Maps route link. Coordinates are demo values; in a pilot they come from ABDM HFR. Drivers still get no medical details.
-- Every hospital, doctor, blood bank and EMT message carries the case ID. A hospital asked for two mothers can answer one by letter or ID, for example `1 B` or `1 MK-123456`. A hospital that already has a mother coming is told so before it accepts a second.
-- A held blood unit leaves the hospital's free stock (and returns if the mother does not arrive), so the second mother of the same group is not sent there blindly.
-- Demo: menu ⋮ → **Two mothers at the same time**, or the **Two at once** chip.
-
-## 108 EMT: mother getting worse on the way (added 7 Nov)
-
-- The EMT phone shows **⚠ Mother getting worse** while a mother is in that ambulance (or the EMT replies `WORSE` on WhatsApp, then `WORSE 1` to `WORSE 5`).
-- The EMT picks what they see: bleeding more, had a fit, drowsy or not responding, pulse fast or BP low, or other. Facts only, no diagnosis.
-- Before a hospital confirmed: the asked hospital(s) and the district officer are told. After it confirmed: that hospital and the receiving doctor. The nurse sees it and it goes on the case timeline.
-- An EMT can only report on the mother in their own ambulance (checked on the server, also for role logins).
-
-## How routing works (plain code, no AI)
-
-`src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital (with ask-2-at-once, the next ready hospital is asked as backup at the same moment), no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).
-
-## Simulation (synthetic, in `sim/`)
-
-- `sim/Matri-Kavach_v3_simulation.py` and its output `sim/sim.json`: the original 20,000-case estimate. It tests a probability-ranked "confirm while driving" policy, which is **not** the exact MVP algorithm.
-- `sim/mvp_engine_sim.js` and its output `sim/mvp_engine_sim.json`: the same synthetic district, but the hospital choice, reroutes and fallback come from the real `src/engine.js`. Run `node sim/mvp_engine_sim.js`.
-
-Both use made-up hospital positions and readiness rates. They are estimates, not trial results.
-
-## Live mode
-
-`server/` is a Node + Express app with Postgres. Timers run on the server, so closing the browser does not stop them. Opening `/?key=<LIVE_KEY>` uses one shared *live* session whose messages really go out through Twilio to the phones set in the environment:
-
-- SEND: WhatsApp to the proposed hospital phone.
-- Hospital replies on WhatsApp: `1` all ready, `2 20` ready in 20 minutes, `3` not available.
-- No reply in 120 s: a Twilio voice call to the hospital phone, press 1 for all ready.
-- Confirmation: WhatsApp to the doctor (summary link), blood bank and family.
-- Nurse closes the loop on screen or by replying `1/2/3` to the nurse phone.
-
-Messages only go to the numbers in environment variables, never to a number typed in a form. Twilio webhooks are signature-checked. Without Twilio keys, or without the live key, the same flow runs with messages shown on screen only.
-
-Webhook addresses to set in Twilio: WhatsApp sandbox "When a message comes in" = `PUBLIC_BASE_URL/twilio/whatsapp` (POST).
-
-## Run locally
-
+```mermaid
+flowchart LR
+    A[PHC nurse<br/>taps emergency on WhatsApp] --> B{Routing engine<br/>doctor-signed checklist<br/>+ shift check-in}
+    B -->|nearest READY| C[108 leaves at once]
+    B --> D[2 nearest ready hospitals<br/>asked in parallel]
+    D -->|1 All ready| E[Confirmed]
+    D -->|no reply 2 min| F[Automatic call]
+    F -->|still nothing| G[Next ready hospital]
+    G -->|nobody ready| H[Medical college proposed<br/>+ district officer alert]
+    E --> I[Doctor summary · Blood bank hold<br/>Family message · Driver map link]
+    I --> J[Arrival + outcome recorded<br/>loop closed]
 ```
+
+1. **Readiness routing.** The engine picks the nearest hospital on the district's referral list whose doctor-signed checklist is all *yes* this shift. A hospital that has not checked in is **Uncertain**, never treated as Ready.
+2. **Confirm en route.** The ambulance never waits for a confirmation. The two nearest ready hospitals are asked together. The nearer one has priority, and the other is the backup.
+3. **Automatic escalation.** If there is no reply in 2 minutes, the system calls the duty phone. If there is still no answer, it moves to the next ready hospital. If no hospital is ready, the medical college is proposed and the district officer is alerted.
+4. **Ready before arrival.** The doctor gets a facts-only summary through a link that expires in 2 hours. The blood bank is asked to hold a unit of her group, and the family gets a short message.
+5. **Closed loop.** The system records arrival, asks "was it really ready?", and records discharge with a back-referral to the PHC and ASHA. The district dashboard shows readiness gaps by facility and shift.
+
+## Right message, right phone (role-based messaging)
+
+Every message is written for **one role**. The server looks up the phone number, finds the role and the facility or ambulance, and sends only that role's message. A reply is matched to the case through the sender's number.
+
+| Role | Gets on WhatsApp | Number comes from (real deployment) |
+|---|---|---|
+| PHC nurse | Language choice, emergency list, patient form, proposal, SEND / CHANGE, status | PHC duty phone, OTP login |
+| Labour room (DH / SDH / CHC) | `INCOMING` with ETA and facts, buttons 1 / 2 / 3, TEAM, DISCHARGED | Duty phone registered once with the HFR facility list |
+| 108 driver | Pickup point, hospital, Google Maps route. **Never patient details** | 108 control room |
+| 108 EMT | Clinical handover (ISBAR) and a `WORSE` button | 108 control room |
+| Doctor on call | Facts-only summary link (expires in 2 h) | District duty roster |
+| Blood bank | Hold request for the mother's blood group (JSSK) | District blood bank list |
+| Family | Hospital name, ETA, "bring the MCP card" | Typed by the nurse for this case only |
+| District officer | Escalations, missed check-ins and gaps. No patient name | District |
+
+The district registers the numbers once. Nothing is set up per case. In the demo, numbers are added by hand only because Meta's free test number allows 5 recipients.
+
+## Try it in 2 minutes
+
+Open **https://matri-kavach-mvp.onrender.com/chat**. Each visitor gets a private session that sends nothing to real phones.
+
+1. On the **Nurse** phone, tap **Hi**, choose **English**, then **Choose emergency → Heavy bleeding**.
+2. Tap **Fill patient details → Send**. The values are pre-filled.
+3. See the proposal. CHC Sonpur is skipped because it has no anaesthetist tonight, and DH Devgarh is proposed with the time of its last readiness check. Tap **SEND**.
+4. Use **Switch phone** to open **DH Devgarh** and tap **1 All ready**, or **3 Not available** to watch the reroute to SDH Kheri.
+5. Open the **Doctor**, **Blood bank**, **Family**, **108 driver** and **108 EMT** phones to see what each person gets.
+
+Other things to try from the ⋮ menu:
+- **Skip 2 minutes** (automatic call, then reroute)
+- **No hospital ready**
+- **Two at once** (two mothers, two ambulances)
+- **Auto-play**
+- **District settings** (Hindi, reply time, HFR linkage)
+- **Emergency checklists**
+
+## Live on real WhatsApp
+
+The same engine runs on real WhatsApp through the **Meta WhatsApp Cloud API**:
+
+- reply buttons and list messages (language, emergency, SEND / CHANGE, 1 / 2 / 3);
+- an **in-chat patient form** built with WhatsApp Flows, with a one-page web form as fallback;
+- English and Hindi (the Hindi texts are pending clinical review);
+- `HELP`, `STATUS`, `RESET`, `NEW`, `CASE B`, `WORSE`, `TEAM`, `DISCHARGED`;
+- quick keywords like `BLEED B+` or `FITS O+`, which work like an SMS.
+
+The full flow was tested end to end on real phones, with the nurse and the receiving hospital on separate phones.
+
+## Emergencies covered
+
+Six readiness checklists, all **signed by our clinical partner, Moulvi Gufran** (final-year MBBS), on 7 Nov 2026:
+
+- heavy bleeding after delivery (PPH);
+- fits / eclampsia;
+- obstructed labour;
+- bleeding before delivery (APH);
+- fever after delivery (sepsis);
+- newborn emergency.
+
+All six come from one 17-item shift check-in, grouped as Staff, Rooms and beds, Blood and drugs, Equipment and lab. For PPH, a hospital needs all of these: blood for the mother's group, an obstetrician, an anaesthetist, a free theatre, uterotonics, IV fluids and an HDU bed. **Other** is never routed. The nurse is told to call the doctor. An obstetrician and a paediatrician must still validate the lists before any pilot.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    WA[WhatsApp<br/>Meta Cloud API] -->|signed webhook| S[Node.js + Express]
+    WEB[Web demo /chat] --> S
+    S --> E[Routing engine<br/>pure functions]
+    S --> DB[(PostgreSQL)]
+    S --> T[Per-case 2-min timers]
+    S -->|no-reply call| V[Twilio voice]
+    S -.mock.-> X[ABDM HFR · 108 · e-RaktKosh]
+```
+
+- **Routing engine** (`src/engine.js`): pure, deterministic functions. The same input gives the same route, 100 times out of 100. No AI in routing, on purpose, so that doctors can audit every decision.
+- **Server** (`server/`): Express app, case sessions, timers, Meta WhatsApp, WhatsApp Flows, Twilio voice and SMS, and a Postgres store (it falls back to memory when `DATABASE_URL` is not set).
+- **Frontend** (`index.html`, `chat.html`, `src/`): plain HTML and JS with no build step. A dashboard view and a WhatsApp-style view share the same `/api/act` actions.
+- **Simulation** (`sim/`): a Python model with 20,000 night emergencies, plus a run of the real JS engine.
+
+### Where AI is used, and where it is not
+
+| Used | Not used, on purpose |
+|---|---|
+| Next step: turning the in-charge's shift voice note into checklist answers, always shown back for confirmation | Picking the hospital, deciding readiness, diagnosis, risk scores |
+
+## Safety and privacy
+
+- **Assistive, never diagnostic.** The nurse chooses the emergency, doctors define readiness, and the system only routes and informs.
+- Only doctor-signed checklists are switched on. **Uncertain is never treated as Ready.** The medical college is never skipped.
+- Facts-only summary, with no risk score.
+- **Minimum data per role.** The driver, family and district never get clinical details. The summary link expires in 2 hours.
+- Messages go only to registered numbers. Webhooks are signature-checked, and keys are kept only in server settings.
+- Every decision is logged, and the nurse can override with **CHANGE**.
+
+## Evaluation
+
+| What | Result |
+|---|---|
+| Automated tests | **78 passing**: confirm, silence, call, reroute, nobody ready, Uncertain never Ready, determinism, forged webhooks, two mothers at once, in-chat form |
+| Real phones | Full referral on real WhatsApp with separate nurse and hospital phones |
+| Simulation, 20,000 night emergencies (synthetic district) | Ready hospital at the first facility: **52% → 97%**. Average time to a ready hospital: **131 → 63 min** |
+| Real engine on simulated nights (85% check-ins) | First hospital reached was ready in **99.6%** of cases. Mean time to a ready hospital: 129 → 66 min |
+
+> The simulations model the routing rules on synthetic data. They are not field results. A 10-week district pilot is the next validation step.
+
+## Run it locally
+
+```bash
+git clone https://github.com/MG782469/matri-kavach-mvp.git
+cd matri-kavach-mvp
 npm install
-npm test
-npm start          # http://localhost:3000, in-memory storage when DATABASE_URL is empty
+npm start          # http://localhost:3000  and  /chat
+npm test           # 78 tests
 ```
 
-Deploy on Render: Web Service, build `npm install`, start `npm start`, environment variables from `.env.example`.
+Node 20 or newer. With no environment variables set, the app runs fully in memory, as a demo that sends no messages.
 
-## Static fallback
+### Environment variables (all optional)
 
-`index.html` also works as a static page (no server): it falls back to an in-browser demo with a scripted hospital.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string. Without it, state is kept in memory |
+| `LIVE_KEY` | Unlocks the real-phone session (`/?key=...`). Judges' sessions never message real phones |
+| `WA_TOKEN`, `WA_PHONE_NUMBER_ID`, `WA_GRAPH_VERSION` | Meta WhatsApp Cloud API |
+| `WA_WABA_ID`, `WA_FLOWS`, `WA_FLOW_MODE`, `WA_DISPLAY_NUMBER` | WhatsApp Flows (in-chat form) settings |
+| `TEST_PHONE` | Default demo phone for every role |
+| `PHONE_<ROLE>` | Phone number for one role: `NURSE`, `DH`, `SDH`, `CHC`, `MC`, `DOCTOR`, `BLOODBANK`, `FAMILY`, `DISTRICT`, `ASHA`, `DRIVER`, `EMT`, `DRIVER2`, `EMT2`. Unset roles fall back to `TEST_PHONE` |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM` | No-reply voice call and SMS fallback |
+| `REPLY_WINDOW_SEC`, `IVR_WAIT_SEC`, `BLOOD_HOLD_MIN` | Timers |
+| `PUBLIC_BASE_URL` | Public URL for links (Render sets `RENDER_EXTERNAL_URL` automatically) |
 
-## One-click Render setup
+`render.yaml` is a Render Blueprint for one-click deploys.
 
-`render.yaml` is a Render Blueprint. On Render: New, Blueprint, pick this repo. It fills in the service name, region, build and start commands, generates `LIVE_KEY`, and asks for `DATABASE_URL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TEST_PHONE`. `TEST_PHONE` is one phone that plays the nurse, hospitals, doctor and family.
+## Project structure
 
-## Telegram test channel (free)
+```
+server/   index.js (routes, webhooks) · session.js (cases, timers, actions) · meta.js (WhatsApp)
+          flows.js (WhatsApp Flows form) · notify.js (Twilio) · store.js (Postgres)
+src/      engine.js (routing rules) · data.js (synthetic district, checklists) · messages.js (EN/HI texts)
+          app.js (dashboard) · chat.js (WhatsApp-style view)
+tests/    engine, server, features, multicase, emt, flows
+sim/      20,000-case simulation (Python) and real-engine simulation (JS)
+```
 
-Twilio's trial WhatsApp number only sends Twilio's own templates, so for the team test the same alerts can go by Telegram. Make a bot with @BotFather, put its token in `TELEGRAM_BOT_TOKEN` on Render, and redeploy. The live page (`/?key=<LIVE_KEY>`) then shows "Connect phones on Telegram" links. Open one on a phone and tap Start. Hospital messages come with reply buttons (1 All ready, 2 15, 3 Not available). With no Twilio voice number, a second URGENT message stands in for the no-reply call. WhatsApp stays the production channel.
+## Roadmap
 
-## WhatsApp through Meta Cloud API (free)
+- **Pilot:** one district for 10 weeks, with the district maternal health officer. Success means more referrals closed with an outcome, more first hospitals that were ready, fewer minutes to a ready hospital, and a high check-in rate.
+- **Clinical:** obstetrician and paediatrician validation of the six checklists, then planned (non-emergency) referrals.
+- **Product:** voice-note AI for the shift check-in, live 108 GPS ETA, bed and blood counts per hospital, Telugu.
+- **Integrations:** ABDM HFR, 108 dispatch (destination only), e-RaktKosh, and a verified WhatsApp Business number.
 
-Twilio's trial blocked the sandbox join, so the live test uses Meta's own WhatsApp Cloud API test number, which is free for up to 5 recipient numbers. Set `WA_TOKEN` and `WA_PHONE_NUMBER_ID` on Render. In the Meta app, set the webhook Callback URL to `/meta/webhook` and the Verify token shown on the live page, and subscribe to the `messages` field. Each test phone sends one message to the test number first: free-form messages only go out inside the 24-hour window that opens. Hospital alerts arrive with three reply buttons.
+## Team InnoVerse
 
-## WhatsApp-style view
+- **Manas Girdhar**, Team Leader and Technical Lead (B.Tech, BIT Mesra). Built the routing engine, the server, the WhatsApp integration and the simulation.
+- **Moulvi Gufran**, Clinical partner (final-year MBBS). Wrote and signed the readiness checklists and reviewed every staff message.
 
-Open `/chat` (for example https://matri-kavach.onrender.com/chat). It shows the same referral on each person's phone as a WhatsApp-style chat with the Matri-Kavach business number: nurse, each hospital duty phone, doctor, blood bank, family, district officer, PHC and ASHA. Buttons, the patient form, the 2-minute timer and the automatic call screen all call the same server actions as the dashboard view, so the two views always show the same case. Add `?key=LIVE_KEY` to drive the live session that sends real WhatsApp messages.
+---
 
-## WhatsApp (Meta Cloud API) commands
-
-On WhatsApp every message starts with whose phone it is for (Nurse, DH Devgarh, 108 EMT, Doctor, District...), because in the team test one phone plays every role. Lists and buttons appear where the nurse or hospital has to choose.
-
-- Nurse: `Hi` (emergency list), `SEND` / `CHANGE`, one-line details `Lakshmi Devi, 24, B+, family yes` (before or after SEND), `BLEED B+`, `NEW`, `CASE B`
-- Hospital: `1` / `2 20` / `3`, `TEAM`, `DISCHARGED`, `FULL` / `OPEN`, `CHECKIN DH` then `CHECKIN DH OK` or `CHECKIN DH NO 3 7`
-- 108 EMT: `WORSE 1`-`5`
-- District: `STATUS` (dashboard), `REPORT` (monthly readiness report)
-- Anyone: `HELP`
+*Prototype for Health-a-thon 2026. All names, hospitals, phone numbers and cases are synthetic. Not a medical device. It does not diagnose or replace clinical judgement.*
