@@ -26,6 +26,7 @@ const HELP = ['ℹ️ *Matri-Kavach on WhatsApp*: what you can type',
   '• BLEED B+ or FITS O+: one-line quick referral with blood group',
   '• SEND / CHANGE: confirm or change the hospital',
   '• NEW: a second mother at the same time · CASE A / CASE B: switch',
+  '• RESET: close every case and start a fresh demo night',
   '*Hospital labour room*',
   '• 1 All ready · 2 20 (ready in 20 min) · 3 Not available (add B for mother B: 1 B)',
   '• TEAM: team ready at the door · DISCHARGED: she went home',
@@ -163,6 +164,13 @@ function createApp(opts = {}) {
     info.role = isRole('nurse') ? 'nurse' : null;
     if (/^(help|menu|commands|\?)$/i.test(body)) { info.role = null; return HELP; }
     await withSession('live', true, async (s) => {
+      /* RESET from the nurse phone: wipe every open case and start a fresh demo night (same as the Reset button). */
+      if (/^(reset|restart|clear all)$/i.test(body) && isRole('nurse')) {
+        await S.ACTIONS.reset(s, ctx, {});
+        info.role = 'nurse';
+        reply = 'Demo reset: all cases closed, fresh night. Type Hi to start a new referral.';
+        return;
+      }
       const c = s.cur;
       /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
       const named = S.refInText(s, body);
