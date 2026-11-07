@@ -278,7 +278,7 @@ test('nurse chat starts empty and Hi opens the menu', async () => {
     r = (await h.act(sid, 'nurseText', { text: 'hello' })).body;
     assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot', 'bot']);
     assert.match(r.chat[1].text, /Namaste/);
-    assert.match(r.chat[2].text, /reply with a number: 1 Heavy bleeding after delivery \(PPH\), 2 Fits or eclampsia.*6 Newborn emergency, 7 Other: call the doctor now \(call the doctor\)/);
+    assert.match(r.chat[2].text, /reply with a number: 1 Heavy bleeding after delivery \(PPH\), 2 Fits or eclampsia.*6 Newborn emergency, 7 Other: call the doctor now\. Each list/);
     r = (await h.act(sid, 'nurseText', { text: 'what now' })).body;
     assert.match(r.chat[4].text, /Type Hi/);
   } finally { h.server.close(); }
