@@ -177,7 +177,8 @@ function createApp(opts = {}) {
         const lg = body.match(/^(?:lang\s*(en|hi)|(english|hindi|हिंदी|हिन्दी)(?:\s*\(hindi\))?)$/i);
         if (lg) { s.settings.lang = /^(en|english)$/i.test(lg[1] || lg[2]) ? 'en' : 'hi'; body = 'Hi'; }
         else if (S.GREETING.test(body) && (!c || s.step === 'done')) { info.role = 'nurse'; reply = M.T.langAsk; return; }
-        if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = M.fill('detailsAsk', {}, s.settings.lang); return; }
+        if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = S.waFormStart(s); return; }
+        if (S.waFormOpen(s) && !/^(new|case\s+[a-z]|send|change)$/i.test(body)) { info.role = 'nurse'; reply = await S.waFormAnswer(s, ctx, body); return; }
       }
       /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
       const named = S.refInText(s, body);

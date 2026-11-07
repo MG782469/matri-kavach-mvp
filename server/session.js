@@ -704,6 +704,88 @@ async function waDetails(s, ctx, a) {
   return s;
 }
 
+/* WhatsApp patient-details form: the same questions as the web form, one at a time, with buttons for the choices.
+   "Add details" starts it; SKIP leaves a question empty; CANCEL stops. Facts only, never a guess. */
+const BLOOD_OPTS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Not known'];
+function waFormQs(s) {
+  const t = typeOf(s);
+  const qs = [
+    { id: 'name', label: 'Name' },
+    { id: 'age', label: 'Age' },
+    { id: 'blood', label: 'Blood group (MCP card)', options: BLOOD_OPTS },
+    { id: 'contact', label: 'Family contact (phone)', skip: true },
+    { id: 'abha', label: 'ABHA number (optional; ABDM link is a mock)', skip: true }
+  ].concat(formFor(t.id).map((q) => Object.assign({}, q, { options: q.options ? q.options.concat(q.options.includes('Unknown') || q.options.includes('Not checked') || q.options.includes('Not yet delivered') ? [] : ['Unknown']) : null, skip: true })));
+  qs.push({ id: 'informed', label: 'Family told that details go to the hospital?', options: ['Yes', 'No'] });
+  return qs;
+}
+function waFormAsk(s) {
+  const f = s.waForm; const qs = waFormQs(s); const q = qs[f.i];
+  const head = `📝 Patient details: ${typeOf(s).short} (${f.i + 1}/${qs.length})\nFacts only. Yes / No / Unknown, never a guess.\n\n*${q.label}*`;
+  if (q.options) return head + '\nTap: ' + q.options.map((o, i) => `${i + 1} ${o}`).join(', ') + '.';
+  return head + '\nType the answer' + (q.skip ? ', or SKIP.' : '.') + (q.value ? ` Example: ${q.value}` : '') + '\n(CANCEL stops the form.)';
+}
+function waFormStart(s) {
+  if (!s.cur) return 'Start a referral first: type Hi.';
+  s.waForm = { ref: s.cur.id, i: 0, a: {} };
+  return waFormAsk(s);
+}
+const waFormOpen = (s) => Boolean(s.waForm && s.cur && s.waForm.ref === s.cur.id);
+async function waFormAnswer(s, ctx, body) {
+  const f = s.waForm; const qs = waFormQs(s); const text = clean(body, 100);
+  if (/^cancel$/i.test(text)) { s.waForm = null; return 'Form stopped. Nothing was changed. Tap Add details to start again.'; }
+  if (f.i >= qs.length) { // confirm step
+    if (/^(1|save)$/i.test(text)) return waFormSave(s, ctx);
+    if (/^(2|again|restart)$/i.test(text)) { s.waForm = { ref: f.ref, i: 0, a: {} }; return waFormAsk(s); }
+    return waFormSummary(s);
+  }
+  const q = qs[f.i];
+  if (q.options) {
+    const n = text.match(/^(\d{1,2})\b/);
+    const pick = n ? q.options[Number(n[1]) - 1] : q.options.find((o) => o.toLowerCase() === text.toLowerCase());
+    if (!pick) return 'Please tap one of the buttons.\n\n' + waFormAsk(s);
+    f.a[q.id] = pick === 'Not known' ? '' : pick;
+  } else if (/^skip$/i.test(text)) {
+    if (!q.skip) return 'This one is needed. ' + waFormAsk(s);
+    f.a[q.id] = '';
+  } else f.a[q.id] = text;
+  f.i += 1;
+  return f.i < qs.length ? waFormAsk(s) : waFormSummary(s);
+}
+function waFormLines(s) {
+  return waFormQs(s).filter((q) => s.waForm.a[q.id]).map((q) => `• ${q.label.replace(/\?$/, '').replace(/ \(.*\)$/, '')}: ${s.waForm.a[q.id]}`);
+}
+function waFormSummary(s) {
+  return `📝 Check the details (${typeOf(s).short}):\n` + waFormLines(s).join('\n') + '\n\nTap: 1 Save and send, 2 Start again.';
+}
+async function waFormSave(s, ctx) {
+  const c = s.cur; const a = s.waForm.a;
+  const p = Object.assign({}, c.patient || {});
+  const newGroup = a.blood && a.blood !== p.blood;
+  waFormQs(s).forEach((q) => { if (q.id !== 'informed' && a[q.id] != null) p[q.id] = a[q.id]; });
+  if (a.informed) p.informed = a.informed;
+  if (!p.name) p.name = 'Name to follow';
+  setCur(s, Object.assign({}, c, { patient: p }));
+  const lines = waFormLines(s);
+  s.waForm = null;
+  const who = [p.name, p.age && p.age + ' years', p.blood && 'blood group ' + p.blood].filter(Boolean).join(', ');
+  const facts = formFor(typeOf(s).id).filter((q) => p[q.id]).map((q) => q.label.replace(/\?$/, '') + ': ' + p[q.id]).join('; ');
+  say(s, 'nurse', 'Details form: ' + who);
+  addEvent(s, ctx, 'Details form sent on WhatsApp: ' + who + (facts ? '. ' + facts : ''));
+  const hid = s.step === 'proposed' ? null : s.cur.confirmed || s.cur.destination || (['sent', 'ivr', 'confirmed', 'fallback'].includes(s.cur.state) ? s.cur.proposal : null);
+  let out = '✅ Details saved:\n' + lines.join('\n');
+  if (hid) {
+    const h = fac(s, hid);
+    if (h) await tellC(s, ctx, h.id, h.short, M.fill('waDetailsHosp', { who: who + (facts ? '. ' + facts : ''), informed: p.informed || 'Not recorded' }));
+    if (h && newGroup && s.cur.bloodHoldUntil) await tellC(s, ctx, 'bloodbank', 'Blood bank', M.fill('bloodLater', { hospital: h.short, group: p.blood }));
+    if (h) out += `\n\n${h.short} has the details.`;
+  } else if (s.step === 'proposed') {
+    const h = fac(s, s.cur.proposal);
+    if (h) out += '\n\n' + tr(s, 'proposed', { hospital: h.short, km: h.km, eta: eta(h) });
+  }
+  return out;
+}
+
 /* WhatsApp: shift check-in by text. "CHECKIN DH" shows the numbered items; "CHECKIN DH OK" or "CHECKIN DH NO 3 7" saves it. */
 function waCheckinList(s, fid) {
   const f = fac(s, fid);
@@ -1057,5 +1139,5 @@ function roleView(view, role) {
     drill: view.drill });
 }
 
-module.exports = { GREETING, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+module.exports = { GREETING, waFormStart, waFormAnswer, waFormOpen, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
   loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById, isDetailsText, waCheckin, waCheckinList, waStatus };
