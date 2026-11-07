@@ -209,12 +209,14 @@ test('role login: code, token, own messages only, and actions limited to the rol
   } finally { h.server.close(); }
 });
 
-test('an unsigned emergency (newborn) is never routed: the nurse sees the proposed list and is told to call the doctor', async () => {
+test('newborn emergency is routed now that M Gufran signed it (7 Nov): only a hospital with paediatrician and SNCU bed', async () => {
   const h = await boot();
   try {
-    const r = await h.act('startReferral', { typeId: 'newborn' });
-    assert.strictEqual(r.cur, null);
-    assert.ok(r.chat.some((m) => /waiting for M Gufran to sign/.test(m.text) && /Call the doctor now/.test(m.text)));
+    await h.act('startReferral', { typeId: 'newborn' });
+    const r = await h.act('details', { patient: { name: 'Baby of Lakshmi', blood: 'B+', informed: 'Yes', breath: 'No', other: 'Baby blue at birth, crying weak after bag-mask' } });
+    assert.strictEqual(r.cur.type, 'newborn');
+    assert.strictEqual(r.cur.proposal, 'dh'); // CHC has no paediatrician
+    assert.strictEqual(r.cur.patient.other, 'Baby blue at birth, crying weak after bag-mask', 'the free-text Other box keeps up to 100 characters');
   } finally { h.server.close(); }
 });
 
@@ -239,7 +241,9 @@ test('signed checklists route each emergency to a hospital that passes its own l
     assert.ok(D.forms[t.id], t.id + ' has its own nurse form');
     t.items.forEach((i) => assert.ok(D.checklistItems.concat(D.extraItems).some((x) => x.id === i), t.id + ' item ' + i));
   });
-  assert.strictEqual(D.emergencyTypes.find((t) => t.id === 'newborn').signed, false);
+  assert.strictEqual(D.emergencyTypes.find((t) => t.id === 'newborn').signed, true);
+  assert.strictEqual(D.emergencyTypes.find((t) => t.id === 'other').signed, false);
+  Object.values(D.forms).forEach((f) => assert.strictEqual(f[f.length - 1].id, 'other', 'every form ends with an Other box'));
 });
 
 test('APH referral shows the no-vaginal-examination safety line; sepsis does not alert the blood bank', async () => {

@@ -476,7 +476,7 @@
   }
   function typeSheet() {
     openSheet('<h3>Choose emergency</h3>' + D.emergencyTypes.map(function (t, i) {
-      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? (t.review ? '<small>' + esc(t.review) + '</small>' : '') : '<small>Checklist waiting for sign-off: call the doctor</small>') + '</span><span class="radio"></span></button>';
+      return '<button class="opt" role="radio" data-act="type" data-v="' + t.id + '" aria-checked="' + (i === 0) + '"><span>' + esc(t.label) + (t.signed ? '<small>✓ Signed by clinical partner</small>' : '<small>Not available here: call the doctor now</small>') + '</span><span class="radio"></span></button>';
     }).join('') + '<button class="go" data-act="type-send">Send</button>');
   }
   function detailsSheet() {

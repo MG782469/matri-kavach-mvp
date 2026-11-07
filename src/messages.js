@@ -11,6 +11,8 @@
     noAmbulance: 'URGENT: no free 108 ambulance for case [id] (Mother [tag]). Both ambulances are on other referrals. Please send the nearest free 108 to [from].',
     secondCase: 'Note: you already have case [other] coming to you. Reply 1 only if you can also take this second mother.',
     pickType: 'Tap one emergency type:',
+    typeList: 'On WhatsApp, reply with a number: [list]. Each list is signed by our clinical partner.',
+    typeNumber: 'Emergency chosen: [type]. Send the patient details when you can.',
     typeNotSigned: 'This emergency has no signed checklist yet. Call the doctor now.',
     reviewNote: 'Checklist status: [review].',
     details: 'Patient details. You can send these now or later.',
@@ -91,6 +93,7 @@
      Placeholders stay the same. Keys without a Hindi text fall back to English. */
   var HI = {
     hello: 'नमस्ते! यह मातृ-कवच है, PHC रामपुर के लिए आपातकालीन रेफ़रल सहायता। रेफ़रल शुरू करने के लिए Choose emergency दबाएँ।',
+    typeList: 'WhatsApp पर नंबर भेजें: [list]। हर सूची पर हमारे क्लिनिकल पार्टनर के हस्ताक्षर हैं।',
     sayHi: 'नया आपातकालीन रेफ़रल शुरू करने के लिए Hi लिखें, या BLEED B+ जैसा छोटा शब्द भेजें।',
     busy: 'एक रेफ़रल चल रहा है। ऊपर के बटन इस्तेमाल करें, या दूसरी माँ के लिए NEW लिखें।',
     typeNotSigned: 'इस आपातकाल की चेकलिस्ट पर अभी हस्ताक्षर नहीं हुए हैं। अभी डॉक्टर को फ़ोन करें।',

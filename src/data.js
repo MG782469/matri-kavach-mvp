@@ -115,9 +115,9 @@
       { id: 'sepsis', label: 'Fever after delivery (possible sepsis)', short: 'Sepsis', signed: true,
         items: ['antibiotics', 'iv', 'airway', 'lab', 'obstetrician', 'anaesthetist', 'theatre', 'hdu'],
         needs: 'IV antibiotics, HDU bed, obstetrician', bloodBank: false, review: 'Signed by M Gufran (typed name, 4 Nov 2026). Obstetrician validation needed before a pilot' },
-      // Not on the sign-off record yet: shown as a proposed list, not routed.
-      { id: 'newborn', label: 'Newborn emergency', short: 'Newborn', signed: false,
-        draft: ['Paediatrician on duty or on call', 'SNCU bed free', 'Oxygen and bag-mask working', 'Newborn resuscitation corner ready'] },
+      { id: 'newborn', label: 'Newborn emergency', short: 'Newborn', signed: true,
+      items: ['paed', 'sncu', 'airway', 'newborn'],
+      needs: 'paediatrician, SNCU bed, newborn resuscitation', bloodBank: false, review: 'Signed by M Gufran (hand-signed, 7 Nov 2026). Obstetrician and paediatrician validation needed before a pilot' },
       { id: 'other', label: 'Other: call the doctor now', signed: false }
     ],
     // Baseline from our simulation of 20,000 synthetic night emergencies (not real data).
@@ -170,7 +170,14 @@
         { id: 'moving', label: 'Baby moving?', options: ['Yes', 'No', 'Unknown'] },
         { id: 'iv', label: 'IV line in place?', options: ['Yes', 'No'] }
       ],
-      sepsis: [
+      newborn: [
+      { id: 'born', label: 'Baby born at', value: '22:41' },
+      { id: 'weight', label: 'Birth weight (kg)', value: '1.9' },
+      { id: 'breath', label: 'Baby breathing on its own?', options: ['No', 'Yes', 'Unknown'] },
+      { id: 'bagmask', label: 'Bag-mask or oxygen given?', options: ['Yes', 'No'] },
+      { id: 'warm', label: 'Baby kept warm (skin-to-skin or warmer)?', options: ['Yes', 'No'] }
+    ],
+    sepsis: [
         { id: 'delivered', label: 'Delivered on', value: '3 days ago' },
         { id: 'temp', label: 'Temperature', value: '39.2 °C' },
         { id: 'pulse', label: 'Pulse', value: '124' },
@@ -180,6 +187,8 @@
       ]
     }
   };
+  // Every emergency form ends with a free-text "Other" box (M Gufran's sign-off sheet, 7 Nov 2026). Facts only.
+  Object.keys(DATA.forms).forEach(function (k) { DATA.forms[k].push({ id: 'other', label: 'Other details (optional)', value: '' }); });
   if (typeof module !== 'undefined' && module.exports) module.exports = DATA;
   root.MK = root.MK || {}; root.MK.DATA = DATA;
 })(typeof window !== 'undefined' ? window : globalThis);

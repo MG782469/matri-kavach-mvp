@@ -276,10 +276,11 @@ test('nurse chat starts empty and Hi opens the menu', async () => {
     let r = await fetch(h.base + '/api/state?sid=' + sid).then((x) => x.json());
     assert.strictEqual(r.chat.length, 0);
     r = (await h.act(sid, 'nurseText', { text: 'hello' })).body;
-    assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot']);
+    assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot', 'bot']);
     assert.match(r.chat[1].text, /Namaste/);
+    assert.match(r.chat[2].text, /reply with a number: 1 Heavy bleeding after delivery \(PPH\), 2 Fits or eclampsia.*6 Newborn emergency, 7 Other: call the doctor now \(call the doctor\)/);
     r = (await h.act(sid, 'nurseText', { text: 'what now' })).body;
-    assert.match(r.chat[3].text, /Type Hi/);
+    assert.match(r.chat[4].text, /Type Hi/);
   } finally { h.server.close(); }
 });
 
@@ -306,12 +307,23 @@ test('fits / eclampsia referral: own form, own alert text, review label, no bloo
   } finally { h.server.close(); }
 });
 
-test('newborn emergency is still blocked: the nurse is told to call the doctor', async () => {
+test('"Other" emergency is never routed: the nurse is told to call the doctor', async () => {
   const h = await boot();
   try {
-    const r = (await h.act(SID, 'startReferral', { typeId: 'newborn' })).body;
+    const r = (await h.act(SID, 'startReferral', { typeId: 'other' })).body;
     assert.strictEqual(r.cur, null);
     assert.match(r.chat[r.chat.length - 1].text, /Call the doctor/);
+  } finally { h.server.close(); }
+});
+
+test('WhatsApp-style text: Hi, then a number picks the emergency (6 = newborn, signed 7 Nov)', async () => {
+  const h = await boot();
+  try {
+    await h.act(SID, 'nurseText', { text: 'Hi' });
+    const r = (await h.act(SID, 'nurseText', { text: '6' })).body;
+    assert.strictEqual(r.cur.type, 'newborn');
+    assert.ok(['proposed', 'routed'].includes(r.step) || r.cur.state === 'routed');
+    assert.ok(r.chat.some((m) => /Emergency chosen: Newborn emergency/.test(m.text)));
   } finally { h.server.close(); }
 });
 

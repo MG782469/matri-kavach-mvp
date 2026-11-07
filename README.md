@@ -16,7 +16,7 @@ Open https://matri-kavach.onrender.com/chat (WhatsApp-style view, recommended) o
 
 Use the *No hospital ready* scenario to see the fallback: "No hospital has confirmed readiness. District emergency escalation initiated. Medical college proposed as tertiary fallback, subject to clinical coordination and state referral protocols." The medical college is only proposed. Until it replies Yes, no doctor, family or blood bank message goes out and no arrival step is shown. If it says No, the district and clinicians coordinate the destination.
 
-Emergency types: heavy bleeding after delivery (PPH), fits / eclampsia, obstructed labour, bleeding before delivery (APH) and fever after delivery (sepsis). All five checklists are signed by M Gufran, our clinical partner (typed-name record, 4 Nov 2026); an obstetrician must still validate them before any pilot, and the app says so. Newborn emergency has a proposed list waiting for sign-off, so it is not routed and the nurse is told to call the doctor. See all lists in the ⋮ menu: **📋 Emergency checklists**.
+Emergency types: heavy bleeding after delivery (PPH), fits / eclampsia, obstructed labour, bleeding before delivery (APH), fever after delivery (sepsis) and newborn emergency. All six checklists are signed by M Gufran, our clinical partner (typed-name record 4 Nov 2026; hand-signed sheet for all six plus the shift check-in, 7 Nov 2026); an obstetrician (and a paediatrician for newborn) must still validate them before any pilot, and the app says so. "Other" is never routed: the nurse is told to call the doctor. Every nurse form ends with a free-text **Other details** box. On plain WhatsApp, Hi is answered with a numbered list of emergencies; the nurse replies with the number. See all lists in the ⋮ menu: **📋 Emergency checklists**.
 
 The call screen in `/chat` is labelled *Automated call (demo)*. The demo makes no encryption or security claim.
 
@@ -33,7 +33,7 @@ All in the `/chat` view, mostly from the ⋮ menu. Synthetic data; labels say wh
 - **ASHA home emergency**: the ASHA shares a (synthetic) village location; distances are counted from the home and 108 is sent at once.
 - **Supply idea**: OFF by default and not approved. When on, it only advises the district if a nearer hospital lacks only movable items (blood, drugs, IV fluids). Routing never changes because of it.
 - **Role logins (RBAC demo)**: phone number = role, one-time code shown on screen. Logged in, the screen and the API show only that role's messages and allow only that role's actions; the driver, family and district never get the mother's name.
-- **Five signed emergency checklists** from one shift check-in of 17 Yes/No items, grouped as Staff, Rooms and beds, Blood and drugs, Equipment and lab. Newborn emergency is a proposed list waiting for sign-off and is never routed.
+- **Six signed emergency checklists** from one shift check-in of 17 Yes/No items, grouped as Staff, Rooms and beds, Blood and drugs, Equipment and lab.
 - **SMS fallback** for a family without WhatsApp (real SMS needs a paid Twilio number). **ABDM / e-RaktKosh**: HFR IDs, the ABHA field and the e-RaktKosh stock fill are mocks, not connected.
 
 ## Two mothers at the same time (added 7 Nov)

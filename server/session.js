@@ -173,7 +173,7 @@ function summaryLink(s, ctx, hospital) {
     type: t.label, review: t.review || '',
     patient: { name: clean(p.name || D0.mother.name), age: clean(p.age, 4) || 'not given', blood: groupOf(s), abha: p.abha || '' },
     needs: t.needs || '', from: D0.startPoint.name, informed: p.informed || 'Not recorded',
-    facts: formFor(t.id).map((q) => ({ label: q.label, value: clean(p[q.id], 20) })) };
+    facts: formFor(t.id).map((q) => ({ label: q.label, value: clean(p[q.id], q.id === 'other' ? 100 : 20) })) };
   return (ctx.baseUrl() || '') + '/s/' + token;
 }
 
@@ -187,7 +187,7 @@ const incomingText = (s, f) => {
 const emtText = (s, f) => {
   const p = (s.cur && s.cur.patient) || {};
   const t = typeOf(s);
-  const facts = formFor(t.id).filter((q) => p[q.id]).map((q) => q.label.replace(/\?$/, '') + ': ' + clean(p[q.id], 20)).join('; ');
+  const facts = formFor(t.id).filter((q) => p[q.id]).map((q) => q.label.replace(/\?$/, '') + ': ' + clean(p[q.id], q.id === 'other' ? 100 : 20)).join('; ');
   return M.fill('emt', { type: t.short, name: clean(p.name || D0.mother.name), age: clean(p.age || D0.mother.age, 4), group: groupOf(s),
     facts: facts || 'not sent yet', hospital: f.short, eta: eta(f) });
 };
@@ -230,7 +230,7 @@ async function details(s, ctx, a) {
   const patient = { name: clean(p.name), age: clean(p.age, 4), blood: clean(p.blood, 6), contact: clean(p.contact, 20), abha: clean(p.abha, 17),
     informed: ['Yes', 'No'].includes(p.informed) ? p.informed : 'Not recorded' };
   const form = formFor(s.cur.type);
-  form.forEach((q) => { patient[q.id] = clean(p[q.id], 20); });
+  form.forEach((q) => { patient[q.id] = clean(p[q.id], q.id === 'other' ? 100 : 20); });
   s.cur = Object.assign({}, s.cur, { patient });
   const who = [patient.name, patient.age, patient.blood].filter(Boolean).join(', ');
   const key = form.slice(0, 2).filter((q) => patient[q.id]).map((q) => q.label + ' ' + patient[q.id]).join(', ');
@@ -622,7 +622,19 @@ async function nurseText(s, ctx, a) {
   if (GREETING.test(text) && (s.step === 'done' || !s.cur)) {
     if (s.step === 'callback') s.step = 'start';
     if (s.step === 'done') activate(s, null);
-    say(s, 'nurse', text); say(s, 'bot', tr(s, 'hello'));
+    say(s, 'nurse', text); say(s, 'bot', tr(s, 'hello')); say(s, 'bot', typeList(s));
+    return s;
+  }
+  /* A number after Hi picks the emergency (plain WhatsApp has no list button). */
+  const num = !s.cur && s.step === 'start' && text.match(/^([1-9])$/);
+  const picked = num && D0.emergencyTypes[Number(num[1]) - 1];
+  if (picked) {
+    say(s, 'nurse', text);
+    await startReferral(s, ctx, { typeId: picked.id });
+    if (s.cur && s.step === 'details') {
+      say(s, 'bot', tr(s, 'typeNumber', { type: picked.label }));
+      await details(s, ctx, { patient: { name: 'Name to follow', informed: 'Not recorded' }, quiet: true });
+    }
     return s;
   }
   const quick = text.match(QUICK);
@@ -645,6 +657,7 @@ async function nurseText(s, ctx, a) {
   return s;
 }
 
+const typeList = (s) => tr(s, 'typeList', { list: D0.emergencyTypes.map((t, i) => (i + 1) + ' ' + t.label).join(', ') });
 const QUICK = /^(bleed\w*|pph|fits?|ecl\w*)\b\s*((?:ab|a|b|o)\s*(?:[+-]|pos|neg))?/i;
 
 /* A digit typed by the nurse while closing the case (also used for WhatsApp replies). Returns the bot's next question. */
