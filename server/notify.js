@@ -12,7 +12,9 @@ const digits = (p) => String(p || '').replace(/\D/g, '');
 /* TEST_PHONE is one number that stands in for the nurse, the hospitals, the doctor and the family during the team test.
    Blood bank, ASHA and district alerts stay on screen unless their own phone is set (this saves trial messages). */
 const TEST_ROLES = ['nurse', 'chc', 'dh', 'sdh', 'mc', 'doctor', 'family'];
-const phoneFor = (role) => process.env[ROLE_ENV[role]] || (TEST_ROLES.includes(role) ? process.env.TEST_PHONE || '' : '');
+/* On Meta WhatsApp (free service messages) the test phone also gets the 108, blood bank, ASHA and district messages, so one phone shows the whole story. */
+const testRole = (role) => TEST_ROLES.includes(role) || (Boolean(process.env.WA_TOKEN) && Boolean(ROLE_ENV[role]));
+const phoneFor = (role) => process.env[ROLE_ENV[role]] || (testRole(role) ? process.env.TEST_PHONE || '' : '');
 const sameNumber = (a, b) => digits(a).length >= 10 && digits(a).slice(-10) === digits(b).slice(-10);
 const configured = () => Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
 const baseUrl = () => (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');

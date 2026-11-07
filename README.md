@@ -106,3 +106,13 @@ Twilio's trial blocked the sandbox join, so the live test uses Meta's own WhatsA
 ## WhatsApp-style view
 
 Open `/chat` (for example https://matri-kavach.onrender.com/chat). It shows the same referral on each person's phone as a WhatsApp-style chat with the Matri-Kavach business number: nurse, each hospital duty phone, doctor, blood bank, family, district officer, PHC and ASHA. Buttons, the patient form, the 2-minute timer and the automatic call screen all call the same server actions as the dashboard view, so the two views always show the same case. Add `?key=LIVE_KEY` to drive the live session that sends real WhatsApp messages.
+
+## WhatsApp (Meta Cloud API) commands
+
+On WhatsApp every message starts with whose phone it is for (Nurse, DH Devgarh, 108 EMT, Doctor, District...), because in the team test one phone plays every role. Lists and buttons appear where the nurse or hospital has to choose.
+
+- Nurse: `Hi` (emergency list), `SEND` / `CHANGE`, one-line details `Lakshmi Devi, 24, B+, family yes` (before or after SEND), `BLEED B+`, `NEW`, `CASE B`
+- Hospital: `1` / `2 20` / `3`, `TEAM`, `DISCHARGED`, `FULL` / `OPEN`, `CHECKIN DH` then `CHECKIN DH OK` or `CHECKIN DH NO 3 7`
+- 108 EMT: `WORSE 1`-`5`
+- District: `STATUS` (dashboard), `REPORT` (monthly readiness report)
+- Anyone: `HELP`

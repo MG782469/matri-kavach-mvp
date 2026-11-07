@@ -12,6 +12,31 @@ const M = require('../src/messages.js');
 const D = require('../src/data.js');
 
 const ROOT = path.join(__dirname, '..');
+
+/* On WhatsApp every message says whose phone it is for, because in the team test one phone plays every role. */
+const ROLE_LABEL = {
+  nurse: '👩‍⚕️ Nurse Kavitha · PHC Rampur', chc: '🏥 CHC Sonpur · labour room', dh: '🏥 DH Devgarh · labour room', sdh: '🏥 SDH Kheri · labour room',
+  mc: '🏥 GMC Rajnagar · referral desk', doctor: '🩺 Doctor on call', family: '👪 Family of the mother', bloodbank: '🩸 Blood bank',
+  district: '📊 District officer', asha: '🤱 ASHA Sunita', driver: '🚑 108 driver · Ambulance 1', emt: '🚑 108 EMT · Ambulance 1',
+  driver2: '🚑 108 driver · Ambulance 2', emt2: '🚑 108 EMT · Ambulance 2'
+};
+const HELP = ['ℹ️ *Matri-Kavach on WhatsApp*: what you can type',
+  '*Nurse (PHC)*',
+  '• Hi: start a referral (pick the emergency from the list)',
+  '• BLEED B+ or FITS O+: one-line quick referral with blood group',
+  '• SEND / CHANGE: confirm or change the hospital',
+  '• NEW: a second mother at the same time · CASE A / CASE B: switch',
+  '*Hospital labour room*',
+  '• 1 All ready · 2 20 (ready in 20 min) · 3 Not available (add B for mother B: 1 B)',
+  '• TEAM: team ready at the door · DISCHARGED: she went home',
+  '• FULL / OPEN: stop or restart new referrals for 2 hours',
+  '*108 EMT*',
+  '• WORSE 1-5: the mother is getting worse on the way',
+  '*Hospital, every shift*',
+  '• CHECKIN DH (or SDH, CHC): the night shift readiness check-in',
+  '*District officer*',
+  '• STATUS: live dashboard · REPORT: monthly readiness report',
+  'Website (dashboard, map, district view): https://matri-kavach-mvp.onrender.com'].join('\n');
 const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function createApp(opts = {}) {
@@ -23,10 +48,10 @@ function createApp(opts = {}) {
   const canCall = () => notify.configured() && Boolean(process.env.TWILIO_SMS_FROM);
   const ctx = opts.ctx || {
     now: () => Date.now(),
-    send: (live, role, text) => (meta.enabled() ? meta.sendText(live, notify.phoneFor(role), text)
+    send: (live, role, text) => (meta.enabled() ? meta.sendText(live, notify.phoneFor(role), text, ROLE_LABEL[role])
       : telegram.enabled() ? telegram.sendText(live, role, text) : notify.sendText(live, role, text)),
     call: async (live, role, refId, text) => {
-      if (live && !canCall() && meta.enabled()) return meta.sendText(live, notify.phoneFor(role), 'URGENT, no reply in 2 minutes. ' + text);
+      if (live && !canCall() && meta.enabled()) return meta.sendText(live, notify.phoneFor(role), 'URGENT, no reply in 2 minutes. ' + text, ROLE_LABEL[role]);
       if (live && !canCall() && telegram.enabled()) return telegram.sendText(live, role, 'URGENT, no reply in 2 minutes. ' + text);
       return Object.assign({ channel: 'voice' }, await notify.placeCall(live, role, refId));
     },
@@ -132,8 +157,10 @@ function createApp(opts = {}) {
   const guard = (req, res, next) => (notify.validSignature(req) ? next() : res.status(403).send('Bad signature'));
 
   /* A reply from a phone, by WhatsApp or Telegram. isRole(role) says whether the sender plays that role. */
-  async function inbound(isRole, body) {
+  async function inbound(isRole, body, info = {}) {
     let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
+    info.role = isRole('nurse') ? 'nurse' : null;
+    if (/^(help|menu|commands|\?)$/i.test(body)) { info.role = null; return HELP; }
     await withSession('live', true, async (s) => {
       const c = s.cur;
       /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
@@ -159,22 +186,38 @@ function createApp(opts = {}) {
         if (!n) { reply = M.T.emtWorseAsk; return; }
         const sign = (D.worseSigns || [])[Number(n[1]) - 1];
         const k = s.outbox.length;
+        info.role = emtRole;
         await S.ACTIONS.emtWorse(s, ctx, { emt: emtRole, ref, sign: sign && sign.id });
         const ok = s.outbox.slice(k).filter((o) => o.role === emtRole).pop();
-        reply = ok ? ok.text : reply; return;
+        reply = ok ? ok.text : reply; if (ok && ok.status === 'sent') info.skip = true; return;
       }
+      /* Shift check-in, district dashboard and monthly report by text */
+      const ck = body.match(/^check-?\s?in\b\s*(chc|dh|sdh|mc)?\s*(ok|all|yes|no)?\s*([\d\s,]*)$/i);
+      if (ck) {
+        const order = ['dh', 'sdh', 'chc', 'mc'];
+        const fid = ck[1] ? ck[1].toLowerCase() : order.find((id) => isRole(id));
+        if (!fid || !isRole(fid)) { reply = 'Check-in is done from a hospital labour room phone.'; return; }
+        info.role = fid;
+        if (!ck[2]) { reply = S.waCheckinList(s, fid); return; }
+        const missing = /^no$/i.test(ck[2]) ? (ck[3].match(/\d+/g) || []) : [];
+        await S.waCheckin(s, ctx, { facility: fid, missing });
+        info.skip = true; reply = ''; return;
+      }
+      if (/^(status|dashboard)$/i.test(body)) { info.role = isRole('district') ? 'district' : null; reply = S.waStatus(s, ctx); return; }
+      if (/^report$/i.test(body) && isRole('district')) { await S.ACTIONS.monthlyReport(s, ctx, {}); info.skip = true; reply = ''; return; }
       const tc = /^team\b/i.test(body) && caseOf('teamReady');
-      if (tc) { await S.ACTIONS.teamReady(s, ctx, tc); reply = 'Recorded: team ready at the door' + idOf(tc) + '. The PHC and the 108 EMT have been told.'; return; }
+      if (tc) { info.role = tc.facility; await S.ACTIONS.teamReady(s, ctx, tc); reply = 'Recorded: team ready at the door' + idOf(tc) + '. The PHC and the 108 EMT have been told.'; return; }
       const dc = /^disch/i.test(body) && caseOf('discharge');
-      if (dc) { await S.ACTIONS.discharge(s, ctx, dc); reply = 'Recorded: discharged home' + idOf(dc) + '. The PHC and ASHA have the back-referral.'; return; }
+      if (dc) { info.role = dc.facility; await S.ACTIONS.discharge(s, ctx, dc); reply = 'Recorded: discharged home' + idOf(dc) + '. The PHC and ASHA have the back-referral.'; return; }
       const fc = /^[123]\b/.test(body) && caseOf('feedback');
-      if (fc) { await S.ACTIONS.feedback(s, ctx, Object.assign({ value: body[0] }, fc)); reply = 'Thank you. Your feedback was sent to the PHC.'; return; }
+      if (fc) { info.role = fc.facility; await S.ACTIONS.feedback(s, ctx, Object.assign({ value: body[0] }, fc)); reply = 'Thank you. Your feedback was sent to the PHC.'; return; }
       const hosp = s.facilities.find((f) => f.kind === 'hospital' && isRole(f.id));
+      if (hosp && /^(full|open)\b/i.test(body)) info.role = hosp.id;
       if (hosp && /^full\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: true }); reply = hosp.full ? 'Recorded: FULL for 2 hours. Reply OPEN when you can take patients again.' : 'Please answer the referral first: reply 3 if you cannot take her.'; return; }
       if (hosp && /^open\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: false }); reply = 'Recorded: open for referrals again.'; return; }
       const drillFor = s.drill && !s.drill.done && s.drill.ids.find((id) => s.drill.replies[id] == null && isRole(id));
       if (drillFor && /^1\b/.test(body) && !(c && ['sent', 'ivr', 'routed'].includes(c.state))) { await S.ACTIONS.drillReply(s, ctx, { facility: drillFor }); reply = 'Drill reply recorded. Thank you.'; return; }
-      if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step) || /^(new|case\s+[a-z]|bleed|pph|fits?|ecl)\b/i.test(body))) {
+      if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step) || /^(new|case\s+[a-z]|bleed|pph|fits?|ecl)\b/i.test(body) || (c && S.isDetailsText(body)))) {
         const n = s.chat.length;
         await S.ACTIONS.nurseText(s, ctx, { text: body });
         const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
@@ -184,6 +227,7 @@ function createApp(opts = {}) {
       }
       const hc = caseOf('hospitalReply');
       if (hc) {
+        info.role = hc.facility;
         const hr = S.refById(s, hc.ref);
         const asked = hc.facility;
         const isBackup = asked !== hr.proposal;
@@ -222,8 +266,9 @@ function createApp(opts = {}) {
     console.log('meta webhook: field=' + (fields || '-') + ' messages=' + msgs.length + msgs.map((m) => ' from=..' + String(m.from).slice(-4)).join(''));
     for (const m of msgs) {
       try {
-        const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), m.from), m.text);
-        await meta.sendTo(m.from, reply);
+        const info = {};
+        const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), m.from), m.text, info);
+        if (!info.skip) await meta.sendTo(m.from, reply, info.role ? ROLE_LABEL[info.role] : null);
         console.log('meta reply sent to ..' + String(m.from).slice(-4));
       } catch (e) { console.error('meta webhook failed', e.message); }
     }

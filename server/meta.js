@@ -1,6 +1,7 @@
 /* WhatsApp through Meta's own Cloud API (free test number from developers.facebook.com).
    Free-form text works inside the 24-hour window that opens when the phone messages the test number first. */
 const crypto = require('node:crypto');
+const TYPES = (() => { try { return require('../src/data.js').emergencyTypes || []; } catch (e) { return []; } })();
 
 function createMeta(opts = {}) {
   const env = (k) => (opts[k] !== undefined ? opts[k] : process.env[k]);
@@ -29,22 +30,53 @@ function createMeta(opts = {}) {
 
   const to = (phone) => String(phone || '').replace(/\D/g, '');
 
-  async function sendTo(phone, text) {
-    if (/^INCOMING|^URGENT/.test(text) && text.length <= 1024) {
-      return api({ messaging_product: 'whatsapp', to: to(phone), type: 'interactive', interactive: {
-        type: 'button', body: { text },
-        action: { buttons: [
-          { type: 'reply', reply: { id: '1', title: '1 All ready' } },
-          { type: 'reply', reply: { id: '2 15', title: '2 Ready in 15 min' } },
-          { type: 'reply', reply: { id: '3', title: '3 Not available' } }] } } });
+  /* Turns a plain reply into a WhatsApp list or buttons when it ends with numbered choices, so nobody has to type numbers.
+     `label` (who this phone is acting as) goes on top, because in the team test one phone plays every role. */
+  function shape(phone, text, label) {
+    const base = { messaging_product: 'whatsapp', to: to(phone) };
+    const head = label ? { type: 'text', text: label.slice(0, 60) } : undefined;
+    const plain = () => Object.assign(base, { type: 'text', text: { body: (label ? '*' + label + '*\n' : '') + text, preview_url: false } });
+    const buttons = (body, opts) => Object.assign(base, { type: 'interactive', interactive: Object.assign(head ? { header: head } : {}, {
+      type: 'button', body: { text: body },
+      action: { buttons: opts.map((o) => ({ type: 'reply', reply: { id: o.id, title: o.title.slice(0, 20) } })) } }) });
+    const list = (body, opts, button) => Object.assign(base, { type: 'interactive', interactive: Object.assign(head ? { header: head } : {}, {
+      type: 'list', body: { text: body },
+      action: { button: (button || 'Choose').slice(0, 20), sections: [{ title: 'Choose one', rows: opts.slice(0, 10).map((o) => Object.assign({ id: o.id, title: o.title.slice(0, 24) }, o.desc ? { description: o.desc.slice(0, 72) } : {})) }] } }) });
+    if (text.length > 1000) return plain();
+    if (/^INCOMING|^URGENT/.test(text)) {
+      return buttons(text, [{ id: '1', title: '1 All ready' }, { id: '2 15', title: '2 Ready in 15 min' }, { id: '3', title: '3 Not available' }]);
     }
-    return api({ messaging_product: 'whatsapp', to: to(phone), type: 'text', text: { body: text, preview_url: false } });
+    // Emergency list after Hi
+    const tl = text.match(/^([\s\S]*?)\s*On WhatsApp, reply with a number: [\s\S]*$/);
+    if (tl && TYPES.length) {
+      const body = tl[1].replace(/ Tap Choose emergency to start a referral\./, '') + '\n\nTap *Choose emergency* below. Each list is signed by our clinical partner.';
+      return list(body, TYPES.map((t, i) => ({ id: String(i + 1), title: (i + 1) + ' ' + (t.short || t.label), desc: t.label })), 'Choose emergency');
+    }
+    if (/Tap SEND to confirm, or CHANGE to pick another\./.test(text)) {
+      return buttons(text.replace('Tap SEND to confirm, or CHANGE to pick another.', 'Tap *SEND* to confirm, or *CHANGE* to pick another.'),
+        [{ id: 'SEND', title: '✅ SEND' }, { id: 'CHANGE', title: '🔁 CHANGE' }]);
+    }
+    // Numbered choices at the end of the last line: "Tap: 1 Yes, 2 No, 3 Transferred." / "Outcome: 1 Delivered, 2 Other."
+    const lines = text.split('\n'); const last = lines[lines.length - 1];
+    const at = last.search(/(?:Tap:?|Tap one\.|Outcome:|number:)\s*1\s+\S/);
+    if (at >= 0) {
+      const tail = last.slice(at).replace(/^(?:Tap:?|Tap one\.|Outcome:|number:)\s*/, '');
+      const opts = tail.split(/[.,]\s+(?=\d+\s)/).map((x) => x.trim().replace(/\.$/, '').match(/^(\d+)\s+(.+)$/)).filter(Boolean).map((m) => ({ id: m[1], title: m[1] + ' ' + m[2], desc: m[2] }));
+      if (opts.length >= 2 && opts.length <= 10) {
+        return opts.length <= 3 && opts.every((o) => o.title.length <= 20) ? buttons(text, opts) : list(text, opts);
+      }
+    }
+    return plain();
   }
 
-  async function sendText(live, phone, text) {
+  async function sendTo(phone, text, label) {
+    return api(shape(phone, text, label));
+  }
+
+  async function sendText(live, phone, text, label) {
     if (!live) return { status: 'simulated', channel: 'screen' };
     if (!phone) return { status: 'no-phone', channel: 'none' };
-    try { await sendTo(phone, text); return { status: 'sent', channel: 'whatsapp' }; } catch (e) {
+    try { await sendTo(phone, text, label); return { status: 'sent', channel: 'whatsapp' }; } catch (e) {
       console.error('meta send failed', e.message);
       return { status: 'failed', channel: 'whatsapp', error: e.message };
     }
@@ -69,7 +101,7 @@ function createMeta(opts = {}) {
     return out;
   }
 
-  return { enabled, verifyToken, sendText, sendTo, validSignature, incoming };
+  return { enabled, verifyToken, sendText, sendTo, validSignature, incoming, shape };
 }
 
 module.exports = { createMeta };

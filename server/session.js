@@ -321,7 +321,7 @@ async function afterEngine(s, ctx, prev, r, minutes, prevBackup) {
       if (took) h.bloodStock[g] -= 1;
       setCur(s, Object.assign({}, s.cur, { bloodHoldUntil: until }, took ? { bloodTaken: { fac: h.id, group: g } } : {}));
       addEvent(s, ctx, `Blood bank asked to hold one ${group} unit until ${clock(until)}`);
-      await tellC(s, ctx, 'bloodbank', 'Blood bank', M.fill('blood', { hospital: h.short, group, until: clock(until), hold: HOLD_MIN }));
+      await tellC(s, ctx, 'bloodbank', 'Blood bank', M.fill(group === 'not known yet' ? 'bloodUnknown' : 'blood', { hospital: h.short, group, until: clock(until), hold: HOLD_MIN }));
     }
     await tellC(s, ctx, h.id, h.short, M.T.hospAfter);
     await tellDriver(s, ctx, M.fill('driverOk', { hospital: h.short }), h.id);
@@ -649,12 +649,86 @@ async function nurseText(s, ctx, a) {
     return s;
   }
   if (s.step === 'callback' && /^[12]$/.test(text)) return nurseCall(s, ctx, { digit: text });
+  if (s.cur && isDetailsText(text)) return waDetails(s, ctx, { text: a.text });
   if (s.step === 'proposed' && /^send$/i.test(text)) return send(s, ctx);
   if (s.step === 'proposed' && /^change$/i.test(text)) return change(s, ctx);
   if (s.step === 'close' && /^[1-9]$/.test(text)) return closeDigit(s, ctx, text);
   say(s, 'nurse', text);
   say(s, 'bot', s.cur ? tr(s, 'busy') : tr(s, 'sayHi'));
   return s;
+}
+
+/* WhatsApp: the nurse types the patient details in one line, before or after SEND ("Lakshmi Devi, 24, B+, family yes"). */
+const BLOOD_RE = /^(ab|a|b|o)\s*(\+|-|pos(?:itive)?|neg(?:ative)?|\+ve|-ve)$/i;
+function parseDetails(text) {
+  const t = String(text || '').replace(/^(details?|d)\s*[:\-]\s*|^details?\s+/i, '');
+  const parts = t.split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2 && !/^details?\b/i.test(String(text))) return null;
+  const out = {};
+  for (const x of parts) {
+    const fam = x.match(/^(?:family(?:\s+informed)?)\s*[:\-]?\s*(yes|no|haan|nahi)$/i);
+    if (fam) { out.informed = /^(yes|haan)$/i.test(fam[1]) ? 'Yes' : 'No'; continue; }
+    const age = x.match(/^(\d{2})(?:\s*(?:y|yr|yrs|years?|sal))?$/i);
+    if (age && !out.age) { out.age = age[1]; continue; }
+    const bg = x.replace(/\s+/g, ' ').match(BLOOD_RE);
+    if (bg && !out.blood) { out.blood = bg[1].toUpperCase() + (/^(\+|pos|\+ve)/i.test(bg[2]) ? '+' : '-'); continue; }
+    if (!out.name && /^[a-z][a-z .']{1,40}$/i.test(x)) { out.name = x.replace(/\s+/g, ' '); continue; }
+  }
+  const n = ['name', 'age', 'blood'].filter((k) => out[k]).length;
+  return n >= 2 || (n >= 1 && /^details?\b/i.test(String(text))) ? out : null;
+}
+const isDetailsText = (text) => Boolean(parseDetails(text));
+
+async function waDetails(s, ctx, a) {
+  const c = s.cur; const d = parseDetails(a.text);
+  if (!c || !d) return s;
+  const p = Object.assign({}, c.patient || {});
+  if (d.name) p.name = clean(d.name); if (d.age) p.age = clean(d.age, 4);
+  const newGroup = d.blood && clean(d.blood, 6) !== p.blood;
+  if (d.blood) p.blood = clean(d.blood, 6);
+  if (d.informed) p.informed = d.informed;
+  setCur(s, Object.assign({}, c, { patient: p }));
+  const who = [p.name, p.age && p.age + ' years', p.blood && 'blood group ' + p.blood].filter(Boolean).join(', ');
+  say(s, 'nurse', a.text);
+  say(s, 'bot', M.fill('waDetails', { who, informed: p.informed || 'Not recorded' }));
+  addEvent(s, ctx, 'Details sent on WhatsApp: ' + who);
+  const hid = s.step === 'proposed' ? null : s.cur.confirmed || s.cur.destination || (['sent', 'ivr', 'confirmed', 'fallback'].includes(s.cur.state) ? s.cur.proposal : null);
+  if (hid) {
+    const h = fac(s, hid);
+    if (h) await tellC(s, ctx, h.id, h.short, M.fill('waDetailsHosp', { who, informed: p.informed || 'Not recorded' }));
+    if (h && newGroup && s.cur.bloodHoldUntil) await tellC(s, ctx, 'bloodbank', 'Blood bank', M.fill('bloodLater', { hospital: h.short, group: p.blood }));
+  } else if (s.step === 'proposed') {
+    const h = fac(s, s.cur.proposal);
+    if (h) say(s, 'bot', tr(s, 'proposed', { hospital: h.short, km: h.km, eta: eta(h) }));
+  }
+  return s;
+}
+
+/* WhatsApp: shift check-in by text. "CHECKIN DH" shows the numbered items; "CHECKIN DH OK" or "CHECKIN DH NO 3 7" saves it. */
+function waCheckinList(s, fid) {
+  const f = fac(s, fid);
+  return `🗒️ Night shift check-in for ${f.short} (${f.who}). Which of these are NOT ready tonight?\n` +
+    ALL_ITEMS.map((it, i) => `${i + 1}. ${it.label}`).join('\n') +
+    `\n\nReply CHECKIN ${fid.toUpperCase()} OK if all are ready, or CHECKIN ${fid.toUpperCase()} NO and the numbers that are not ready, for example: CHECKIN ${fid.toUpperCase()} NO 3 7`;
+}
+async function waCheckin(s, ctx, a) {
+  const f = fac(s, a.facility); if (!f) return s;
+  const off = new Set((a.missing || []).map(Number));
+  const items = {}; ALL_ITEMS.forEach((it, i) => { items[it.id] = !off.has(i + 1); });
+  return checkin(s, ctx, { facility: f.id, items, nurses: f.checkin && f.checkin.nurses != null ? f.checkin.nurses : 3 });
+}
+/* WhatsApp: the district officer's dashboard as one message. */
+function waStatus(s, ctx) {
+  const open = (s.refs || []).filter((r) => !['closed'].includes(r.state));
+  const hosp = s.facilities.filter((f) => f.kind === 'hospital' || f.kind === 'fallback');
+  const icon = { ready: '🟢', partial: '🟡', uncertain: '⚪', 'not-ready': '🔴' };
+  const rows = hosp.map((f) => {
+    const st = E.facilityStatus(f, C(s), 'bleeding');
+    const when = f.checkin ? 'check-in ' + clock(f.checkin.at) : 'no check-in';
+    return `${icon[st] || '⚪'} ${f.short}: ${st.replace('-', ' ')} for heavy bleeding (${when}${f.full ? ', FULL' : ''})`;
+  });
+  const cases = open.length ? open.map((r) => `• ${r.id}${r.tag ? ' (Mother ' + r.tag + ')' : ''}: ${(D0.emergencyTypes.find((t) => t.id === r.type) || {}).short || r.type}, ${r.state}${r.confirmed ? ' at ' + fac(s, r.confirmed).short : r.proposal ? ', asked ' + fac(s, r.proposal).short : ''}`).join('\n') : '• none';
+  return `📊 District dashboard, ${clock(ctx.now())}\n*Hospitals tonight*\n${rows.join('\n')}\n*Open referrals*\n${cases}\n\nType REPORT for the monthly readiness report. Full map and KPIs: https://matri-kavach-mvp.onrender.com`;
 }
 
 const typeList = (s) => tr(s, 'typeList', { list: D0.emergencyTypes.map((t, i) => (i + 1) + ' ' + t.label).join(', ') });
@@ -969,4 +1043,4 @@ function roleView(view, role) {
 }
 
 module.exports = { emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
-  loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById };
+  loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById, isDetailsText, waCheckin, waCheckinList, waStatus };
