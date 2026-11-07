@@ -415,6 +415,27 @@
   function onOff(key, on, label, sub) {
     return '<div class="ck"><span>' + esc(label) + (sub ? '<small class="sub2"><br>' + esc(sub) + '</small>' : '') + '</span><span class="yn"><button data-act="set" data-v="' + key + ':true" aria-pressed="' + on + '">On</button><button data-act="set" data-v="' + key + ':false" aria-pressed="' + !on + '">Off</button></span></div>';
   }
+  /* Referral linkage for this PHC (set once by the district) and the HFR extract it comes from. Mock: no live HFR call. */
+  function linkageHtml(idle) {
+    var L = D.linkage || {}, dir = D.hfrDirectory || [];
+    var linked = ST.facilities.filter(function (f) { return f.kind === 'hospital'; });
+    var fb = ST.facilities.filter(function (f) { return f.kind === 'fallback'; });
+    var lvl = function (f) { var h = dir.find(function (x) { return x.hfr === f.hfr; }); return h ? h.level : (f.level || ''); };
+    var chain = '<div class="panel" style="margin:8px 0"><h2>Referral linkage: ' + esc(L.phc || 'PHC') + '</h2><dl class="kv">' +
+      linked.map(function (f) { return '<dt>' + esc(f.short) + '</dt><dd>' + f.km + ' km' + (lvl(f) ? ' · ' + esc(lvl(f)) : '') + (f.hfr ? ' · HFR ' + esc(f.hfr) : '') + '</dd>'; }).join('') +
+      fb.map(function (f) { return '<dt>' + esc(f.short) + '</dt><dd>Tertiary fallback only · ' + f.km + ' km' + (f.hfr ? ' · HFR ' + esc(f.hfr) : '') + '</dd>'; }).join('') +
+      '</dl><p class="sub2">Set once by the ' + esc(L.setBy || 'district') + ' on ' + esc(L.setOn || '') + '. ' + esc(L.reviewed || '') + '. Source: ' + esc(L.source || '') + '</p>' +
+      '<p class="sub2">Each night Matri-Kavach asks only the nearest 2 hospitals from this list that are ready for the emergency, never all of them.</p></div>';
+    var have = {}; ST.facilities.forEach(function (f) { if (f.hfr) have[f.hfr] = true; });
+    var rest = dir.filter(function (h) { return !h.linked && !have[h.hfr]; });
+    var list = '<h3>Import from HFR (demo)</h3><p class="sub2">Synthetic HFR extract for this district. Link a hospital to ' + esc(L.phc || 'the PHC') + '; it starts with no check-in and gets no referral until its labour room checks in.</p>' +
+      (rest.length ? rest.map(function (h) {
+        var ok = h.level !== 'PHC' && idle && ST.facilities.filter(function (f) { return f.added; }).length < 4;
+        var why = h.level === 'PHC' ? 'A PHC cannot take obstetric emergencies' : !idle ? 'Finish the current referral first' : '';
+        return '<div class="ck"><span>' + esc(h.name) + '<small class="sub2"><br>' + esc(h.type) + ' · ' + esc(h.level) + ' · ' + esc(h.owner) + ' · ' + h.km + ' km · HFR ' + esc(h.hfr) + (why ? '<br>' + esc(why) : '') + '</small></span><span class="yn"><button data-act="hfr-link" data-v="' + esc(h.hfr) + '"' + (ok ? '' : ' disabled') + '>Link</button></span></div>';
+      }).join('') : '<p class="sub2">All hospitals from the extract are linked.</p>');
+    return chain + list;
+  }
   function settingsSheet() {
     var st = ST.settings || {}, rw = st.replyWindowSec || ST.replyWindowSec;
     var added = ST.facilities.filter(function (f) { return f.added; });
@@ -425,6 +446,7 @@
       '<div class="ck"><span>Nurse chat language<small class="sub2"><br>Hindi texts are pending review by M Gufran. Family gets Hindi and English.</small></span><span class="yn"><button data-act="set" data-v="lang:en" aria-pressed="' + (st.lang !== 'hi') + '">English</button><button data-act="set" data-v="lang:hi" aria-pressed="' + (st.lang === 'hi') + '">हिंदी</button></span></div>' +
       onOff('smsFamily', st.smsFamily, 'Family has no WhatsApp: send SMS', 'Plain SMS fallback. Real SMS needs a paid Twilio number') +
       onOff('supply', st.supply, 'Supply idea (not approved)', 'OFF by default. Only advises the district when a nearer hospital lacks only movable items. Routing never changes') +
+      linkageHtml(idle) +
       '<h3>Hospital editor</h3><p class="sub2">A new hospital starts with no check-in, so it gets no referral until its labour room checks in.</p>' +
       added.map(function (f) { return '<div class="ck"><span>' + esc(f.short) + ', ' + f.km + ' km</span><span class="yn"><button data-act="h-del" data-v="' + esc(f.id) + '"' + (idle ? '' : ' disabled') + '>Remove</button></span></div>'; }).join('') +
       (added.length < 4 ? '<div class="two"><label>Name<input id="h-name" maxlength="40" placeholder="CHC Naya"></label><label>Km from PHC<input id="h-km" type="number" min="1" max="150" inputmode="numeric" placeholder="12"></label></div><button class="opt" data-act="h-add"' + (idle ? '' : ' disabled') + '><span>Add hospital' + (idle ? '' : '<small>Finish the current referral first</small>') + '</span></button>' : '') +
@@ -602,6 +624,7 @@
       else if (a === 'set') { var p2 = v.split(':'), val = p2[1] === 'true' ? true : p2[1] === 'false' ? false : /^\d+$/.test(p2[1]) ? Number(p2[1]) : p2[1]; var o = {}; o[p2[0]] = val; act('setSettings', o).then(settingsSheet); }
       else if (a === 'h-add') { var hn = $('h-name'), hk = $('h-km'); act('addHospital', { name: hn ? hn.value : '', km: hk ? Number(hk.value) : 0 }).then(settingsSheet); }
       else if (a === 'h-del') act('removeHospital', { id: v }).then(settingsSheet);
+      else if (a === 'hfr-link') act('importHfr', { hfr: v }).then(settingsSheet);
       else if (a === 'home-open') homeSheet();
       else if (a === 'home-go') {
         var ht = document.querySelector('.sheet [data-g="ht"][aria-checked="true"]'), hv = document.querySelector('.sheet [data-g="hv"][aria-checked="true"]'), hb = $('h-blood');

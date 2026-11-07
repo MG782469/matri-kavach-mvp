@@ -96,6 +96,21 @@
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: true, newborn: true, antibiotics: true, usg: true, paed: true, sncu: true } } }
     ],
+    /* Referral linkage for PHC Rampur: set once by the district from the state referral plan and ABDM HFR. All synthetic. */
+    linkage: { phc: 'PHC Rampur', source: 'State referral linkage plan + ABDM Health Facility Registry (HFR). Mock in this MVP: the real HFR API needs ABDM sandbox approval.', setBy: 'District officer', setOn: '1 Nov 2026', reviewed: 'Reviewed every quarter or when a hospital changes its services' },
+    /* A synthetic extract of HFR for this district: what the district officer would see when linking hospitals to the PHC.
+       level: CEmONC (caesarean + blood, first referral unit), BEmONC (basic emergency obstetric care), PHC (no obstetric emergencies). */
+    hfrDirectory: [
+      { hfr: 'IN0000DEMO01', name: 'CHC Sonpur', type: 'CHC', level: 'BEmONC', owner: 'Public', lat: 23.195, lng: 85.365, linked: 'chc' },
+      { hfr: 'IN0000DEMO02', name: 'DH Devgarh', type: 'District Hospital', level: 'CEmONC', owner: 'Public', lat: 23.087, lng: 85.492, linked: 'dh' },
+      { hfr: 'IN0000DEMO03', name: 'SDH Kheri', type: 'Sub-district Hospital', level: 'CEmONC', owner: 'Public', lat: 23.357, lng: 85.198, linked: 'sdh' },
+      { hfr: 'IN0000DEMO04', name: 'GMC Rajnagar', type: 'Medical College', level: 'CEmONC', owner: 'Public', lat: 23.294, lng: 85.786, linked: 'mc' },
+      { hfr: 'IN0000DEMO05', name: 'CHC Barwadih (FRU)', type: 'CHC (First Referral Unit)', level: 'CEmONC', owner: 'Public', lat: 23.052, lng: 85.214, km: 17 },
+      { hfr: 'IN0000DEMO06', name: 'CHC Naya Bazar', type: 'CHC', level: 'BEmONC', owner: 'Public', lat: 23.241, lng: 85.402, km: 19 },
+      { hfr: 'IN0000DEMO07', name: 'Mission Hospital Tamar', type: 'Private hospital (PM-JAY empanelled)', level: 'CEmONC', owner: 'Private', lat: 23.011, lng: 85.371, km: 23 },
+      { hfr: 'IN0000DEMO08', name: 'SDH Latehar', type: 'Sub-district Hospital', level: 'CEmONC', owner: 'Public', lat: 23.398, lng: 85.452, km: 41 },
+      { hfr: 'IN0000DEMO09', name: 'PHC Kesla', type: 'PHC', level: 'PHC', owner: 'Public', lat: 23.172, lng: 85.251, km: 7 }
+    ],
     // Emergency types. Only types with a reviewed checklist route; the others tell the nurse to call the doctor.
     // Emergency types. signed: true = on M Gufran's sign-off record and routed. signed: false = not routed, the nurse calls the doctor.
     emergencyTypes: [

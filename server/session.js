@@ -807,6 +807,21 @@ async function setSettings(s, ctx, a) {
   return s;
 }
 
+/* HFR import (mock): the district links a hospital from the HFR extract to this PHC. Same rules as the editor:
+   it starts with no check-in, so it gets no referral until its labour room checks in. A plain PHC cannot be linked. */
+async function importHfr(s, ctx, a) {
+  const h = (D0.hfrDirectory || []).find((x) => x.hfr === String(a.hfr || ''));
+  if (!h || h.linked || h.level === 'PHC' || s.added.some((f) => f.hfr === h.hfr) || s.added.length >= 4 || busy(s)) return s;
+  const P = D0.startPoint;
+  const f = { id: 'h' + (s.added.length + 1) + crypto.randomBytes(2).toString('hex'), name: h.name, short: h.name, km: h.km, role: 'Labour room', kind: 'hospital', who: 'Duty nurse', ini: h.name[0].toUpperCase(),
+    x: Math.round((P.x + (h.lng - P.lng) * 100) * 10) / 10, y: Math.round((P.y - (h.lat - P.lat) * 100) * 10) / 10, nurses: null, lat: h.lat, lng: h.lng, hfr: h.hfr, level: h.level, added: true };
+  s.added.push(f);
+  s.facilities.push(Object.assign({}, f, { checkin: null, bloodStock: {} }));
+  addEvent(s, ctx, 'District linked ' + h.name + ' (HFR ' + h.hfr + ') to ' + P.name);
+  await tell(s, ctx, f.id, f.short, `Welcome to Matri-Kavach, ${f.short}. The district has linked you to ${P.name} for emergency referrals. Please do the night shift check-in (type CHECKIN). Until then this hospital shows as Uncertain and gets no referrals.`);
+  return s;
+}
+
 /* Hospital editor: the district adds a hospital. It starts Uncertain (no check-in) and gets no referral until it checks in. */
 async function addHospital(s, ctx, a) {
   const name = clean(a.name, 40);
@@ -956,7 +971,7 @@ async function twoAtOnce(s, ctx) {
 }
 
 const RAW = { newCase, switchCase, twoAtOnce, emtWorse, nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport,
-  feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall, eraktSync, setSettings, addHospital, removeHospital, ashaHome };
+  feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall, eraktSync, setSettings, addHospital, removeHospital, importHfr, ashaHome };
 /* Every action first lifts any "full" flag whose 2 hours have passed. */
 const ACTIONS = {};
 Object.keys(RAW).forEach((k) => {
@@ -1006,7 +1021,7 @@ function roleOf(s, ctx, token) {
 /* Which role may run which action. A hospital may only answer, check in or mark full for itself. */
 const NURSE_ACTS = ['newCase', 'switchCase', 'twoAtOnce', 'nurseText', 'startReferral', 'details', 'change', 'send', 'arrived', 'readyCheck', 'outcome', 'missedCall', 'nurseCall', 'skip', 'reset'];
 const HOSP_ACTS = ['hospitalReply', 'ivrAnswer', 'checkin', 'teamReady', 'discharge', 'feedback', 'setFull', 'drillReply', 'eraktSync'];
-const DISTRICT_ACTS = ['monthlyReport', 'drill', 'drillReport', 'setSettings', 'addHospital', 'removeHospital', 'missCheckin', 'reset'];
+const DISTRICT_ACTS = ['monthlyReport', 'drill', 'drillReport', 'setSettings', 'addHospital', 'removeHospital', 'importHfr', 'missCheckin', 'reset'];
 function allowed(s, role, action, a) {
   if (!role) return true; // no login: the open demo, every phone on one screen
   if (role === 'nurse') return NURSE_ACTS.includes(action);

@@ -158,6 +158,20 @@ test('hospital editor: a new hospital is Uncertain until it checks in, then it c
   } finally { h.server.close(); }
 });
 
+test('HFR import (demo): link a CHC from the extract, PHC-level entries are refused', async () => {
+  const h = await boot();
+  try {
+    let r = await h.act('importHfr', { hfr: 'IN0000DEMO05' });
+    const nf = r.facilities.find((f) => f.hfr === 'IN0000DEMO05');
+    assert.ok(nf && nf.checkin === null && nf.added && nf.kind === 'hospital');
+    const before = r.facilities.length;
+    r = await h.act('importHfr', { hfr: 'IN0000DEMO05' });
+    assert.strictEqual(r.facilities.length, before);
+    r = await h.act('importHfr', { hfr: 'IN0000DEMO09' });
+    assert.ok(!r.facilities.some((f) => f.hfr === 'IN0000DEMO09'));
+  } finally { h.server.close(); }
+});
+
 test('ASHA home emergency: distances from the home, ambulance sent at once, driver gets the village', async () => {
   const h = await boot();
   try {
