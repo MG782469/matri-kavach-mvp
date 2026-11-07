@@ -800,7 +800,7 @@ function waFormLink(s, ctx, base) {
   s.formLinks = s.formLinks || {};
   Object.keys(s.formLinks).forEach((k) => { if (s.formLinks[k].expires < ctx.now()) delete s.formLinks[k]; });
   const token = s.id + '.f' + crypto.randomBytes(8).toString('hex');
-  s.formLinks[token] = { ref: s.cur.id, expires: ctx.now() + LINK_TTL_MS };
+  s.formLinks[token] = { ref: s.cur.id, type: s.cur.type, expires: ctx.now() + LINK_TTL_MS };
   return `Open the patient form: ${base}/f/${token}\nFill it on one page and tap Send. The details come back to this chat. (${typeOf(s).short}${s.cur.tag && s.refs.length > 1 ? ', Mother ' + s.cur.tag : ''})`;
 }
 /* WhatsApp: after the emergency is picked, the patient form comes first (like the web demo); SKIP sends without details. */

@@ -109,12 +109,17 @@ function createMeta(opts = {}) {
       const text = m.type === 'text' ? m.text && m.text.body
         : m.type === 'interactive' ? (m.interactive.button_reply || m.interactive.list_reply || {}).id
         : m.type === 'button' ? m.button && (m.button.payload || m.button.text) : null;
+      const nfm = m.type === 'interactive' && m.interactive && m.interactive.nfm_reply;
+      if (m.from && nfm) { // a WhatsApp Flow (in-chat form) was submitted
+        let flow = {}; try { flow = JSON.parse(nfm.response_json || '{}'); } catch (e) { flow = {}; }
+        out.push({ from: m.from, text: 'FLOW REPLY', flow }); continue;
+      }
       if (m.from && typeof text === 'string') out.push({ from: m.from, text: text.trim() });
     }
     return out;
   }
 
-  return { enabled, verifyToken, sendText, sendTo, validSignature, incoming, shape };
+  return { enabled, verifyToken, sendText, sendTo, sendRaw: (body) => api(body), validSignature, incoming, shape };
 }
 
 module.exports = { createMeta };

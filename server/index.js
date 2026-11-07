@@ -7,6 +7,8 @@ const makeStore = require('./store.js');
 const notify = require('./notify.js');
 const { createTelegram } = require('./telegram.js');
 const { createMeta } = require('./meta.js');
+const flowsApi = require('./flows.js');
+const { createFlows } = flowsApi;
 const S = require('./session.js');
 const M = require('../src/messages.js');
 const D = require('../src/data.js');
@@ -44,6 +46,7 @@ function createApp(opts = {}) {
   const store = opts.store || makeStore(process.env.DATABASE_URL);
   const telegram = opts.telegram || createTelegram(store);
   const meta = opts.meta || createMeta();
+  const flows = opts.flows || createFlows();
   /* Texts go by Telegram when a bot token is set, otherwise by Twilio WhatsApp.
      The no-reply call is a Twilio voice call when a Twilio number is set; on Telegram without one, an URGENT second message stands in for it. */
   const canCall = () => notify.configured() && Boolean(process.env.TWILIO_SMS_FROM);
@@ -300,7 +303,30 @@ function createApp(opts = {}) {
     for (const m of msgs) {
       try {
         const info = {};
+        if (m.flow) { // in-WhatsApp form submitted: same save as the web form
+          const tok = String(m.flow.flow_token || '');
+          let text = null;
+          await withSession('live', true, async (s) => {
+            const l = s.formLinks && s.formLinks[tok];
+            text = l ? await S.formSubmit(s, ctx, tok, flowsApi.decode(l.type, m.flow)) : null;
+            return text ? s : undefined;
+          });
+          await meta.sendTo(m.from, text || 'This form has expired. Tap Add details again.', ROLE_LABEL.nurse);
+          console.log('meta flow reply saved for ..' + String(m.from).slice(-4));
+          continue;
+        }
         const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), m.from), m.text, info);
+        const fl = !info.skip && flows.enabled() && /^Open the patient form: \S+\/f\/(live\.f[a-f0-9]{16})\n([\s\S]*)$/.exec(reply);
+        if (fl) { // try the form inside WhatsApp first; the one-page link is the fallback
+          try {
+            const st = await store.get('live');
+            const l = st && st.formLinks && st.formLinks[fl[1]];
+            const id = await flows.ensure((l && l.type) || 'bleeding');
+            await meta.sendRaw(flows.message(m.from, id, fl[1], '📝 ' + fl[2].replace(/one page/, 'this form'), ROLE_LABEL.nurse));
+            console.log('meta flow sent to ..' + String(m.from).slice(-4));
+            continue;
+          } catch (e) { console.error('flow send failed, using the link form:', e.message); }
+        }
         if (!info.skip) await meta.sendTo(m.from, reply, info.role ? ROLE_LABEL[info.role] : null);
         console.log('meta reply sent to ..' + String(m.from).slice(-4));
       } catch (e) { console.error('meta webhook failed', e.message); }
