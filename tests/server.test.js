@@ -269,18 +269,24 @@ test('WhatsApp-style view is served and closing a case records each nurse answer
   } finally { h.server.close(); }
 });
 
-test('nurse chat starts empty and Hi opens the menu', async () => {
+test('nurse chat starts empty, Hi asks the language, then the menu', async () => {
   const h = await boot();
   try {
     const sid = '0123456789abcdef';
     let r = await fetch(h.base + '/api/state?sid=' + sid).then((x) => x.json());
     assert.strictEqual(r.chat.length, 0);
     r = (await h.act(sid, 'nurseText', { text: 'hello' })).body;
+    assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot']);
+    assert.match(r.chat[1].text, /Choose language/);
+    assert.strictEqual(r.step, 'lang');
+    r = (await h.act(sid, 'nurseText', { text: 'LANG EN' })).body;
+    r.chat = r.chat.slice(2);
+    assert.strictEqual(r.step, 'start');
     assert.deepStrictEqual(r.chat.map((m) => m.from), ['nurse', 'bot', 'bot']);
     assert.match(r.chat[1].text, /Namaste/);
     assert.match(r.chat[2].text, /reply with a number: 1 Heavy bleeding after delivery \(PPH\), 2 Fits or eclampsia.*6 Newborn emergency, 7 Other: call the doctor now\. Each list/);
     r = (await h.act(sid, 'nurseText', { text: 'what now' })).body;
-    assert.match(r.chat[4].text, /Type Hi/);
+    assert.match(r.chat[6].text, /Type Hi/);
   } finally { h.server.close(); }
 });
 
@@ -320,6 +326,7 @@ test('WhatsApp-style text: Hi, then a number picks the emergency (6 = newborn, s
   const h = await boot();
   try {
     await h.act(SID, 'nurseText', { text: 'Hi' });
+    await h.act(SID, 'nurseText', { text: 'English' });
     const r = (await h.act(SID, 'nurseText', { text: '6' })).body;
     assert.strictEqual(r.cur.type, 'newborn');
     assert.ok(['proposed', 'routed'].includes(r.step) || r.cur.state === 'routed');

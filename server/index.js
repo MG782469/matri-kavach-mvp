@@ -249,7 +249,7 @@ function createApp(opts = {}) {
       if (drillFor && /^1\b/.test(body) && !(c && ['sent', 'ivr', 'routed'].includes(c.state))) { await S.ACTIONS.drillReply(s, ctx, { facility: drillFor }); reply = 'Drill reply recorded. Thank you.'; return; }
       if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step) || /^(new|case\s+[a-z]|bleed|pph|fits?|ecl)\b/i.test(body) || (c && S.isDetailsText(body)))) {
         const n = s.chat.length;
-        await S.ACTIONS.nurseText(s, ctx, { text: body });
+        await S.ACTIONS.nurseText(s, ctx, { text: body, skipLang: true });
         const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
         const next = s.step === 'close' ? S.closePrompt(s) : null;
         reply = (next && !bot.includes(next) ? bot.concat([next]) : bot).join('\n') || reply;

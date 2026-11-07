@@ -73,6 +73,7 @@
   /* ---------- buttons a WhatsApp interactive message would carry ---------- */
   function nurseButtons() {
     var r = cur(), step = ST.step;
+    if (step === 'lang') return { btns: [['say', 'LANG EN', 'English'], ['say', 'LANG HI', 'हिंदी (Hindi)']] };
     if (step === 'start') return { list: 'Choose emergency', act: 'pick-type' };
     if (step === 'callback') return { btns: [['ncall', '1', 'Press 1: Heavy bleeding'], ['ncall', '2', 'Press 2: Fits / eclampsia']] };
     if (step === 'details') return { list: 'Fill patient details', act: 'open-details' };
@@ -139,7 +140,7 @@
     var ty = function (r) { var t = D.emergencyTypes.filter(function (x) { return x.id === r.type; })[0]; return t ? t.short : r.type; };
     return open.map(function (r) {
       return '<button data-act="case" data-v="' + esc(r.id) + '" aria-pressed="' + String(Boolean(c && c.id === r.id)) + '"><b>' + esc(r.tag || '•') + '</b> ' + esc(ty(r)) + '<small>' + esc(st(r)) + '</small></button>';
-    }).join('') + '<button data-act="newcase" class="nc">+ New mother</button>';
+    }).join('');
   }
 
   function renderMsgs() {
@@ -551,7 +552,7 @@
     D.forms.bleeding.forEach(function (q) { form[q.id] = q.options ? q.options[0] : q.value || ''; });
     var patient = Object.assign({ name: P.name, age: String(P.age), blood: P.bloodGroup, contact: P.contact, informed: 'Yes' }, form);
     var steps = [
-      ['nurse', 'Night, PHC Rampur. Lakshmi is bleeding heavily after delivery. Nurse Kavitha starts a referral.', function () { ECHO = {}; return idleAct('reset', { scenario: 'confirms' }).then(function () { return idleAct('nurseText', { text: 'Hi' }); }); }],
+      ['nurse', 'Night, PHC Rampur. Lakshmi is bleeding heavily after delivery. Nurse Kavitha starts a referral.', function () { ECHO = {}; return idleAct('reset', { scenario: 'confirms' }).then(function () { return idleAct('nurseText', { text: 'Hi', skipLang: true }); }); }],
       ['nurse', 'She picks Heavy bleeding. The checklist was signed by M Gufran, the clinical partner.', function () { return idleAct('startReferral', { typeId: 'bleeding' }); }],
       ['nurse', 'She sends the facts. Matri-Kavach skips CHC Sonpur (no anaesthetist tonight) and proposes DH Devgarh, 21 km.', function () { return idleAct('details', { patient: patient }); }],
       ['nurse', 'She taps SEND. The 108 ambulance leaves at once; the hospital confirms on the way.', function () { return idleAct('send', {}); }],

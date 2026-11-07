@@ -619,8 +619,21 @@ async function nurseText(s, ctx, a) {
   if (/^new\b/i.test(text)) { say(s, 'nurse', text); return newCase(s, ctx, { quiet: true }); }
   const sw = text.match(/^case\s+([a-z])\b/i) || text.match(/^(MK-\d+(?:-\d+)?)$/i);
   if (sw) { say(s, 'nurse', text); return switchCase(s, ctx, /^MK-/i.test(sw[1]) ? { id: sw[1].toUpperCase() } : { tag: sw[1].toUpperCase() }); }
-  if (GREETING.test(text) && (s.step === 'done' || !s.cur)) {
-    if (s.step === 'callback') s.step = 'start';
+  /* Language first, like on WhatsApp: Hi asks English or Hindi; the answer then shows the menu. */
+  const lg = !s.cur && text.match(/^(?:lang\s*(en|hi)|(english|hindi|हिंदी|हिन्दी)(?:\s*\(hindi\))?)$/i);
+  if (lg) {
+    s.settings.lang = /^(en|english)$/i.test(lg[1] || lg[2]) ? 'en' : 'hi';
+    if (s.step === 'lang') s.step = 'start';
+    say(s, 'nurse', s.settings.lang === 'hi' ? 'हिंदी' : 'English'); say(s, 'bot', tr(s, 'hello')); say(s, 'bot', typeList(s));
+    return s;
+  }
+  if (GREETING.test(text) && (s.step === 'done' || !s.cur) && !a.skipLang) {
+    if (s.step === 'done') activate(s, null);
+    say(s, 'nurse', text); say(s, 'bot', M.T.langAsk); s.step = 'lang';
+    return s;
+  }
+  if (GREETING.test(text) && (s.step === 'done' || !s.cur || s.step === 'lang')) {
+    if (s.step === 'callback' || s.step === 'lang') s.step = 'start';
     if (s.step === 'done') activate(s, null);
     say(s, 'nurse', text); say(s, 'bot', tr(s, 'hello')); say(s, 'bot', typeList(s));
     return s;
