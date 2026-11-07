@@ -62,7 +62,7 @@
   }
   function phoneMsgs(role) {
     var list = (ST.outbox || []).filter(function (o) { return o.role === role; }).map(function (o) {
-      return { dir: 'in', text: o.text, at: o.at, call: /^No-reply call/.test(o.label || ''), incoming: /^INCOMING/.test(o.text || ''), sms: o.channel === 'sms', cancel: /^CANCELLED/.test(o.text || '') };
+      return { dir: 'in', text: o.text, at: o.at, call: /^No-reply call/.test(o.label || ''), incoming: /^INCOMING/.test(o.text || ''), sms: o.channel === 'sms', cancel: /^CANCELLED/.test(o.text || ''), worse: /^UPDATE from 108 EMT/.test(o.text || '') };
     });
     (ECHO[role] || []).forEach(function (e) { list.push({ dir: 'out', text: e.text, at: e.at }); });
     return list.sort(function (a, b) { return a.at - b.at; });
@@ -99,6 +99,21 @@
     if (r.dischargedAt && !r.feedback) return [['fb', '1', '1 On time'], ['fb', '2', '2 Should have come earlier'], ['fb', '3', '3 Could have been managed at the PHC']];
     return [];
   }
+  /* 108 EMT: the case in this EMT's ambulance that is on the way (not arrived yet). */
+  function emtRef(role) {
+    var amb = (D.ambulances || []).filter(function (x) { return x.emt === role; })[0];
+    if (!amb) return null;
+    return (ST.refs || []).filter(function (r) { return ['sent', 'ivr', 'confirmed', 'fallback'].indexOf(r.state) !== -1 && !r.arrived && (r.amb || 'amb1') === amb.id; }).pop() || null;
+  }
+  function worseSheet() {
+    openSheet('<h3>Mother getting worse?</h3><p class="sub2">Pick what you see. The hospital is told at once. Facts only, no diagnosis.</p>' +
+      (D.worseSigns || []).map(function (w, i) { return '<button class="opt" data-act="worse" data-v="' + esc(w.id) + '"><span>' + (i + 1) + ' ' + esc(w.label) + '</span></button>'; }).join(''));
+  }
+  function sendWorse(id) {
+    var r = emtRef(VIEW); if (!r) return;
+    var i = (D.worseSigns || []).map(function (w) { return w.id; }).indexOf(id);
+    echo(VIEW, 'WORSE ' + (i + 1)); act('emtWorse', { emt: VIEW, ref: r.id, sign: id });
+  }
   function btnHtml(b) { return '<button data-act="' + b[0] + '" data-v="' + esc(b[1]) + '">' + esc(b[2]) + '</button>'; }
 
   function bubble(m, extra) {
@@ -106,6 +121,7 @@
     var body;
     if (m.call) body = '<span class="callrec"><span class="cic">📞</span><span><b>Voice call</b><br><span class="foot2">' + esc(m.text) + '</span></span></span>';
     else if (m.incoming) body = '<span class="hdr">🚨 Incoming referral' + (/BACKUP/.test(m.text) ? ' (backup)' : '') + '</span>' + linkify(m.text);
+    else if (m.worse) body = '<span class="hdr">⚠ Getting worse on the way</span>' + linkify(m.text);
     else if (m.cancel) body = '<span class="hdr">✖ Cancelled</span>' + linkify(m.text);
     else if (m.sms) body = '<span class="hdr">✉ SMS</span>' + linkify(m.text);
     else body = linkify(m.text);
@@ -152,6 +168,7 @@
     });
     var ha = hospitalAfter(VIEW);
     if (ha.length) html += '<div class="grp in"><div class="qr">' + ha.map(btnHtml).join('') + '</div></div>';
+    if (emtRef(VIEW)) html += '<div class="grp in"><div class="qr"><button data-act="worse-open">⚠ Mother getting worse</button></div></div>';
     if (AUTO) html += '<div class="sysmsg autobar">▶ Auto-play ' + AUTO.i + ' of ' + AUTO.total + ': ' + esc(AUTO.text) + ' <button data-act="auto-stop">Stop</button></div>';
     if (VIEW === 'nurse') {
       var nb = nurseButtons();
@@ -451,6 +468,8 @@
       '<li><b>Close the loop:</b> on arrival the nurse says if everything was really ready (a No alerts the district), the hospital marks discharge, and the PHC and ASHA get the back-referral. The side panel shows the case timeline.</li>' +
       '<li><b>Quick keyword:</b> type <b>BLEED B+</b> or <b>FITS O+</b> instead of Hi, like an SMS. No internet? Tap <b>📞 Missed call</b>: Matri-Kavach calls back and the nurse presses 1 or 2.</li>' +
       '<li><b>Two hospitals at once:</b> after SEND, DH Devgarh (nearer, priority) and SDH Kheri (backup) are both asked. If DH says yes, SDH gets CANCELLED. If SDH says yes first and DH says no or stays silent, SDH is confirmed at once.</li>' +
+      '<li><b>Two mothers at the same time:</b> tap <b>👥 Two at once</b>. Mother A and Mother B each get a case ID, a hospital and a 108 ambulance. Use the A / B chips to switch; open 108 driver and 108 driver 2 to see each map link. A hospital asked for both answers by letter, like <b>1 B</b>.</li>' +
+      '<li><b>Getting worse on the way:</b> after SEND, open the <b>108 EMT</b> phone and tap <b>⚠ Mother getting worse</b>. The EMT picks what they see; the hospital (and the doctor once confirmed, or the district if nobody confirmed yet) is told at once.</li>' +
       '<li><b>More from the ⋮ menu:</b> district settings (Hindi, reply time, SMS, supply idea), hospital editor, ASHA home emergency with location, and log in as one role with a demo OTP.</li>' +
       '<li><b>Short on time?</b> Tap <b>▶ Auto-play</b> and watch the whole case run across every phone. The side panel shows the district KPIs against today’s 131 minutes.</li></ol>' +
       '<p class="sub2">Prototype with synthetic data. Nothing is sent to a real phone. If the page was asleep, the first load can take up to a minute.</p><button class="go" data-act="help-close">Start</button>');
@@ -556,6 +575,8 @@
       else if (a === 'erakt') { var fid = CK ? CK.facility : VIEW; closeSheet(); CK = null; act('eraktSync', { facility: fid }); }
       else if (a === 'miss') { closeSheet(); act('missCheckin', { facility: 'dh' }).then(function () { show('dh'); }); }
       else if (a === 'help') helpSheet();
+      else if (a === 'worse-open') worseSheet();
+      else if (a === 'worse') { closeSheet(); sendWorse(v); }
       else if (a === 'help-close') closeSheet();
       else if (a === 'type') document.querySelectorAll('.sheet .opt').forEach(function (o) { o.setAttribute('aria-checked', String(o === b)); });
       else if (a === 'type-send') { var sel = document.querySelector('.sheet .opt[aria-checked="true"]'); closeSheet(); act('startReferral', { typeId: sel ? sel.dataset.v : 'bleeding' }); }
@@ -632,6 +653,11 @@
     if (h0 === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', { facility: VIEW }); return; }
     if (h0 === 'fb' && /^[123]\b/.test(text)) { echo(VIEW, text); act('feedback', { value: text[0], facility: VIEW }); return; }
     if (h0 === 'drillok' && /^1\b/.test(text)) { echo(VIEW, text); act('drillReply', { facility: VIEW }); return; }
+    if (emtRef(VIEW) && /^(worse|w)\b/i.test(text)) {
+      var wn = text.match(/\b([1-5])\b/), ws = wn && (D.worseSigns || [])[Number(wn[1]) - 1];
+      if (ws) sendWorse(ws.id); else worseSheet();
+      return;
+    }
     if (isHospital(VIEW) && /^(full|open)\b/i.test(text)) { echo(VIEW, text); act('setFull', { facility: VIEW, on: /^full/i.test(text) }); return; }
     echo(VIEW, text); LAST = ''; render();
   }

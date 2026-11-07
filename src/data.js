@@ -12,6 +12,14 @@
       { id: 'amb1', label: '108 Ambulance 1', driver: 'driver', emt: 'emt' },
       { id: 'amb2', label: '108 Ambulance 2', driver: 'driver2', emt: 'emt2' }
     ],
+    // What the 108 EMT can report on the way. The EMT picks what they see; the system only passes it on.
+    worseSigns: [
+      { id: 'bleeding', label: 'Bleeding more' },
+      { id: 'fit', label: 'Had a fit' },
+      { id: 'drowsy', label: 'Drowsy or not responding' },
+      { id: 'vitals', label: 'Pulse fast or BP low' },
+      { id: 'other', label: 'Other, please call the EMT' }
+    ],
     // Synthetic map (km grid) for the district view and for ASHA home emergencies. Not real places.
     villages: [
       { id: 'bhuiyan', name: 'Village Bhuiyan', x: 12, y: 62, lat: 23.042, lng: 85.218 },

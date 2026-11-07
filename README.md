@@ -45,6 +45,13 @@ All in the `/chat` view, mostly from the ⋮ menu. Synthetic data; labels say wh
 - A held blood unit leaves the hospital's free stock (and returns if the mother does not arrive), so the second mother of the same group is not sent there blindly.
 - Demo: menu ⋮ → **Two mothers at the same time**, or the **Two at once** chip.
 
+## 108 EMT: mother getting worse on the way (added 7 Nov)
+
+- The EMT phone shows **⚠ Mother getting worse** while a mother is in that ambulance (or the EMT replies `WORSE` on WhatsApp, then `WORSE 1` to `WORSE 5`).
+- The EMT picks what they see: bleeding more, had a fit, drowsy or not responding, pulse fast or BP low, or other. Facts only, no diagnosis.
+- Before a hospital confirmed: the asked hospital(s) and the district officer are told. After it confirmed: that hospital and the receiving doctor. The nurse sees it and it goes on the case timeline.
+- An EMT can only report on the mother in their own ambulance (checked on the server, also for role logins).
+
 ## How routing works (plain code, no AI)
 
 `src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital (with ask-2-at-once, the next ready hospital is asked as backup at the same moment), no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).

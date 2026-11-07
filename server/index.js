@@ -9,6 +9,7 @@ const { createTelegram } = require('./telegram.js');
 const { createMeta } = require('./meta.js');
 const S = require('./session.js');
 const M = require('../src/messages.js');
+const D = require('../src/data.js');
 
 const ROOT = path.join(__dirname, '..');
 const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -149,6 +150,19 @@ function createApp(opts = {}) {
         return null;
       };
       const idOf = (k) => { const r = k && S.refById(s, k.ref); return r ? ' (case ' + r.id + ')' : ''; };
+      /* The 108 EMT: "WORSE 1" (or "WORSE 1 B" for mother B) tells the hospital she is getting worse. */
+      const emtRole = (D.ambulances || []).map((x) => x.emt).find((r) => isRole(r));
+      if (emtRole && /^(worse|w)\b/i.test(body)) {
+        const n = body.match(/\b([1-5])\b/);
+        const ref = S.emtCase(s, emtRole, named);
+        if (!ref) { reply = 'Matri-Kavach: no mother is on the way in your ambulance right now.'; return; }
+        if (!n) { reply = M.T.emtWorseAsk; return; }
+        const sign = (D.worseSigns || [])[Number(n[1]) - 1];
+        const k = s.outbox.length;
+        await S.ACTIONS.emtWorse(s, ctx, { emt: emtRole, ref, sign: sign && sign.id });
+        const ok = s.outbox.slice(k).filter((o) => o.role === emtRole).pop();
+        reply = ok ? ok.text : reply; return;
+      }
       const tc = /^team\b/i.test(body) && caseOf('teamReady');
       if (tc) { await S.ACTIONS.teamReady(s, ctx, tc); reply = 'Recorded: team ready at the door' + idOf(tc) + '. The PHC and the 108 EMT have been told.'; return; }
       const dc = /^disch/i.test(body) && caseOf('discharge');

@@ -819,6 +819,40 @@ function refInText(s, text) {
   return null;
 }
 
+/* The 108 EMT reports the mother is getting worse on the way. The EMT picks what they see (facts only); the
+   receiving hospital and doctor are told at once, the nurse sees it, and if nobody has confirmed yet the district too. */
+const EN_ROUTE = ['sent', 'ivr', 'confirmed', 'fallback'];
+function emtCase(s, emtRole, ref) {
+  const amb = AMBS.find((a) => a.emt === emtRole);
+  const mine = (r) => r && EN_ROUTE.includes(r.state) && !r.arrived && (!amb || !emtRole || (r.amb || AMBS[0].id) === amb.id);
+  const named = ref && refById(s, String(ref));
+  if (named) return mine(named) ? named.id : null;
+  if (mine(s.cur)) return s.cur.id;
+  const r = (s.refs || []).filter(mine).pop();
+  return r ? r.id : null;
+}
+async function emtWorse(s, ctx, a) {
+  const id = emtCase(s, a.emt || null, a.ref);
+  if (!id) return s;
+  return withCase(s, id, async () => {
+    const c = s.cur;
+    const sg = (D0.worseSigns || []).find((x) => x.id === a.sign) || (D0.worseSigns || [])[0] || { id: 'other', label: 'Other' };
+    setCur(s, Object.assign({}, c, { worse: (c.worse || []).concat([{ at: ctx.now(), sign: sg.id }]) }));
+    const sign = sg.label.toLowerCase();
+    const text = M.fill('emtWorse', { sign });
+    const told = [];
+    const hosp = c.state === 'confirmed' ? [c.confirmed] : [c.proposal, c.backup].filter(Boolean);
+    for (const hid of [...new Set(hosp)]) { const h = fac(s, hid); if (h) { await tellC(s, ctx, h.id, h.short, text); told.push(h.short); } }
+    if (c.state === 'confirmed') { await tellC(s, ctx, 'doctor', 'Receiving doctor', text); told.push('the receiving doctor'); }
+    else { await tellC(s, ctx, 'district', 'District officer', M.fill('emtWorseDistrict', { id: c.id, sign })); told.push('the district officer'); }
+    told.push('PHC nurse');
+    addEvent(s, ctx, '108 EMT: getting worse (' + sign + '). Told ' + told.join(', '));
+    say(s, 'bot', '⚠ 108 EMT: the mother is getting worse on the way (' + sign + '). Told: ' + told.slice(0, -1).join(', ') + '.');
+    await tellEmt(s, ctx, M.fill('emtWorseOk', { sign: sg.label, who: told.join(', ') }));
+    return s;
+  });
+}
+
 /* Demo: two mothers reach the PHC at the same time. Each gets her own case ID, hospital and 108 ambulance. */
 async function twoAtOnce(s, ctx) {
   activate(s, null);
@@ -826,15 +860,15 @@ async function twoAtOnce(s, ctx) {
   const fill = (typeId, extra) => { const p = {}; formFor(typeId).forEach((q) => { p[q.id] = q.options ? q.options[0] : q.value || ''; }); return Object.assign(p, extra); };
   await startReferral(s, ctx, { typeId: 'bleeding' });
   await details(s, ctx, { patient: fill('bleeding', { name: D0.mother.name, age: String(D0.mother.age), blood: D0.mother.bloodGroup, contact: D0.mother.contact, informed: 'Yes' }) });
-  if (s.cur && s.cur.state === 'routed') await send(s, ctx, { quiet: true });
+  if (s.cur && s.cur.state === 'routed') await send(s, ctx, {});
   activate(s, null);
   await startReferral(s, ctx, { typeId: 'fits' });
   await details(s, ctx, { patient: fill('fits', { name: 'Sunita Kumari', age: '22', blood: 'O+', contact: '98XXXXXX22', informed: 'Yes' }) });
-  if (s.cur && s.cur.state === 'routed') await send(s, ctx, { quiet: true });
+  if (s.cur && s.cur.state === 'routed') await send(s, ctx, {});
   return s;
 }
 
-const RAW = { newCase, switchCase, twoAtOnce, nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport,
+const RAW = { newCase, switchCase, twoAtOnce, emtWorse, nurseText, startReferral, details, change, send, hospitalReply, ivrAnswer, skip, arrived, readyCheck, outcome, reset, checkin, missCheckin, teamReady, discharge, monthlyReport,
   feedback, setFull, drill, drillReply, drillReport, missedCall, nurseCall, eraktSync, setSettings, addHospital, removeHospital, ashaHome };
 /* Every action first lifts any "full" flag whose 2 hours have passed. */
 const ACTIONS = {};
@@ -891,6 +925,7 @@ function allowed(s, role, action, a) {
   if (role === 'nurse') return NURSE_ACTS.includes(action);
   if (role === 'district') return DISTRICT_ACTS.includes(action);
   if (role === 'asha') return action === 'ashaHome';
+  if (AMBS.some((x) => x.emt === role)) { if (action !== 'emtWorse') return false; a.emt = role; return Boolean(emtCase(s, role, a.ref)); }
   if (HOSPITAL_ROLES(s).includes(role)) {
     if (!HOSP_ACTS.includes(action)) return false;
     if (CASE_ACTS.includes(action) && !a.facility && !a.ref) a.facility = role; // a hospital acts for itself
@@ -901,12 +936,13 @@ function allowed(s, role, action, a) {
     if (action === 'ivrAnswer') return Boolean(c && c.proposal === role);
     return Boolean(c && (c.confirmed || c.destination) === role);
   }
-  return false; // doctor, blood bank, driver, EMT and family only read their own messages
+  return false; // doctor, blood bank, driver and family only read their own messages
 }
 /* What one role sees: only its own messages. People who do not treat her never get her name or the case history. */
 function roleView(view, role) {
   if (!role) return view;
   const clinical = role === 'nurse' || HOSPITAL_ROLES({ facilities: view.facilities }).includes(role);
+  const emtAmb = AMBS.find((x) => x.emt === role); // the EMT sees only the cases in their own ambulance
   const strip = (r) => r && { id: r.id, tag: r.tag, amb: r.amb, type: r.type, state: r.state, proposal: r.proposal, backup: r.backup, backupYes: r.backupYes, confirmed: r.confirmed,
     destination: r.destination, timerStart: r.timerStart, fallbackDeclined: r.fallbackDeclined, arrived: r.arrived, teamReadyAt: r.teamReadyAt,
     dischargedAt: r.dischargedAt, feedback: r.feedback, createdAt: r.createdAt, decidedAt: r.decidedAt, firstAsked: r.firstAsked, readyOnArrival: r.readyOnArrival, events: [] };
@@ -914,9 +950,10 @@ function roleView(view, role) {
     chat: role === 'nurse' ? view.chat : [],
     outbox: view.outbox.filter((o) => o.role === role),
     cur: clinical ? view.cur : strip(view.cur),
-    refs: role === 'district' ? view.refs.map(strip) : clinical ? view.refs : [],
+    refs: role === 'district' ? view.refs.map(strip) : clinical ? view.refs
+      : emtAmb ? view.refs.filter((r) => (r.amb || AMBS[0].id) === emtAmb.id).map(strip) : [],
     drill: view.drill });
 }
 
-module.exports = { CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+module.exports = { emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
   loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById };
