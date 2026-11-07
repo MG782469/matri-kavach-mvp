@@ -177,7 +177,8 @@ function createApp(opts = {}) {
         const lg = body.match(/^(?:lang\s*(en|hi)|(english|hindi|हिंदी|हिन्दी)(?:\s*\(hindi\))?)$/i);
         if (lg) { s.settings.lang = /^(en|english)$/i.test(lg[1] || lg[2]) ? 'en' : 'hi'; body = 'Hi'; }
         else if (S.GREETING.test(body) && (!c || s.step === 'done')) { info.role = 'nurse'; reply = M.T.langAsk; return; }
-        if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = S.waFormStart(s); return; }
+        if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = notify.baseUrl() ? S.waFormLink(s, ctx, notify.baseUrl()) : S.waFormStart(s); return; }
+        if (/^form$/i.test(body) && c) { info.role = 'nurse'; reply = S.waFormStart(s); return; }
         if (S.waFormOpen(s) && !/^(new|case\s+[a-z]|send|change)$/i.test(body)) { info.role = 'nurse'; reply = await S.waFormAnswer(s, ctx, body); return; }
       }
       /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
@@ -336,6 +337,43 @@ function createApp(opts = {}) {
   });
 
   /* ---- Doctor summary link: facts only, expires in 2 hours ---- */
+  /* Patient details form opened from the WhatsApp "Open form" button (live session only). */
+  const formPage = (res, title, body, status) => res.status(status || 200).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>
+    body{font-family:Arial,sans-serif;margin:0;background:#f5f7fa;color:#232f3e}main{max-width:480px;margin:0 auto;padding:18px 16px 40px}
+    h1{color:#1f3da9;font-size:20px;margin:0 0 4px}.sub{color:#5d6a79;font-size:13px;margin:0 0 14px}
+    label{display:block;font-size:13px;color:#5d6a79;margin:10px 0 0}input,select{display:block;width:100%;box-sizing:border-box;font-size:16px;padding:10px;border:1px solid #c9d1db;border-radius:8px;background:#fff;color:#232f3e;margin-top:4px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.two label{margin-top:10px}
+    button{width:100%;font-size:16px;padding:13px;border-radius:10px;border:0;margin-top:14px;cursor:pointer}
+    .go{background:#1f3da9;color:#fff;font-weight:bold}.alt{background:#fff;border:1px solid #c9d1db;color:#232f3e;text-align:left}.alt small{display:block;color:#5d6a79;font-size:12px}
+    .ok{background:#e8f6ee;border:1px solid #9dd4b1;border-radius:10px;padding:14px;white-space:pre-line}</style></head><body><main>${body}</main></body></html>`);
+  app.get('/f/:token', async (req, res) => {
+    const token = String(req.params.token);
+    if (!/^live\.f[a-f0-9]{16}$/.test(token)) return formPage(res, 'Link not found', '<h1>Link not found</h1>', 404);
+    let v = null;
+    await withSession('live', true, async (s) => { v = await S.formView(s, ctx, token); return undefined; });
+    if (!v) return formPage(res, 'Link expired', '<h1>Link expired</h1><p class="sub">This form link was valid for 2 hours. Tap Add details in WhatsApp again.</p>', 410);
+    const field = (q) => q.options
+      ? `<label>${esc(q.label)}<select name="${esc(q.id)}">${q.options.map((o) => `<option${o === q.value ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`
+      : `<label>${esc(q.label)}<input name="${esc(q.id)}" value="${esc(q.value)}" autocomplete="off"></label>`;
+    const by = Object.fromEntries(v.qs.map((q) => [q.id, q]));
+    const head = ['name', 'age', 'blood', 'contact', 'abha', 'informed'];
+    const rest = v.qs.filter((q) => !head.includes(q.id)).map(field);
+    let pairs = ''; for (let i = 0; i < rest.length; i += 2) pairs += rest[i + 1] ? `<div class="two">${rest[i]}${rest[i + 1]}</div>` : rest[i];
+    formPage(res, 'Patient details', `<h1>Patient details: ${esc(v.type)}</h1><p class="sub">Case ${esc(v.id)}${v.tag ? ' (Mother ' + esc(v.tag) + ')' : ''}. Facts only. Yes / No / Unknown, never a guess.</p>
+      <form method="post">${field(by.name)}<div class="two">${field(by.age)}${field(by.blood)}</div>${field(by.contact)}${field(by.abha)}${pairs}${field(by.informed)}
+      <button type="button" class="alt" onclick="document.querySelectorAll('input').forEach(function(i){i.value=''})">Clear the form<small>Type your own values instead of the demo ones</small></button>
+      <button class="go" type="submit">Send</button></form>`);
+  });
+  app.post('/f/:token', async (req, res) => {
+    const token = String(req.params.token);
+    if (!/^live\.f[a-f0-9]{16}$/.test(token)) return formPage(res, 'Link not found', '<h1>Link not found</h1>', 404);
+    let text = null;
+    await withSession('live', true, async (s) => { text = await S.formSubmit(s, ctx, token, req.body || {}); return text ? s : undefined; });
+    if (!text) return formPage(res, 'Link expired', '<h1>Link expired</h1><p class="sub">Tap Add details in WhatsApp again.</p>', 410);
+    if (meta.enabled() && notify.phoneFor('nurse')) await meta.sendTo(notify.phoneFor('nurse'), text, ROLE_LABEL.nurse).catch((e) => console.error('form reply failed', e.message));
+    formPage(res, 'Details sent', `<h1>✅ Details sent</h1><div class="ok">${esc(text)}</div><p class="sub">Go back to WhatsApp. You can open this form again to correct anything.</p>`);
+  });
+
   app.get('/s/:token', async (req, res) => {
     const token = String(req.params.token);
     const sid = token.split('.')[0];

@@ -786,6 +786,45 @@ async function waFormSave(s, ctx) {
   return out;
 }
 
+/* WhatsApp "Add details" with a web form: one page, the same fields as the web demo, opened from a button in the chat.
+   The link is tied to one case and expires in 2 hours. */
+function waFormLink(s, ctx, base) {
+  if (!s.cur) return 'Start a referral first: type Hi.';
+  s.formLinks = s.formLinks || {};
+  Object.keys(s.formLinks).forEach((k) => { if (s.formLinks[k].expires < ctx.now()) delete s.formLinks[k]; });
+  const token = s.id + '.f' + crypto.randomBytes(8).toString('hex');
+  s.formLinks[token] = { ref: s.cur.id, expires: ctx.now() + LINK_TTL_MS };
+  return `Open the patient form: ${base}/f/${token}\nFill it on one page and tap Send. The details come back to this chat. (${typeOf(s).short}${s.cur.tag && s.refs.length > 1 ? ', Mother ' + s.cur.tag : ''})`;
+}
+async function formView(s, ctx, token) {
+  const l = s.formLinks && s.formLinks[token];
+  if (!l || l.expires < ctx.now() || !refById(s, l.ref)) return null;
+  return withCase(s, l.ref, () => {
+    const p = s.cur.patient || {}; const m = D0.mother || {};
+    const demo = { name: m.name, age: m.age, blood: m.bloodGroup, contact: m.contact };
+    const qs = waFormQs(s).map((q) => {
+      const have = p[q.id] && !/^(Name to follow|Not recorded)$/.test(p[q.id]) ? p[q.id] : '';
+      const v = have || (q.id === 'informed' ? (p.informed === 'No' ? 'No' : 'Yes') : demo[q.id] != null ? String(demo[q.id]) : q.value || (q.options ? q.options[0] : ''));
+      return { id: q.id, label: q.label, options: q.options, value: v };
+    });
+    return { type: typeOf(s).short, id: s.cur.id, tag: s.refs.length > 1 ? s.cur.tag : '', qs };
+  });
+}
+async function formSubmit(s, ctx, token, data) {
+  const l = s.formLinks && s.formLinks[token];
+  if (!l || l.expires < ctx.now() || !refById(s, l.ref)) return null;
+  return withCase(s, l.ref, async () => {
+    const a = {};
+    waFormQs(s).forEach((q) => {
+      let v = clean(data[q.id], q.id === 'other' ? 100 : 40);
+      if (q.options && !q.options.includes(v)) v = '';
+      a[q.id] = v === 'Not known' ? '' : v;
+    });
+    s.waForm = { ref: l.ref, i: 99, a };
+    return waFormSave(s, ctx);
+  });
+}
+
 /* WhatsApp: shift check-in by text. "CHECKIN DH" shows the numbered items; "CHECKIN DH OK" or "CHECKIN DH NO 3 7" saves it. */
 function waCheckinList(s, fid) {
   const f = fac(s, fid);
@@ -1139,5 +1178,5 @@ function roleView(view, role) {
     drill: view.drill });
 }
 
-module.exports = { GREETING, waFormStart, waFormAnswer, waFormOpen, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+module.exports = { GREETING, waFormLink, formView, formSubmit, waFormStart, waFormAnswer, waFormOpen, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
   loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById, isDetailsText, waCheckin, waCheckinList, waStatus };

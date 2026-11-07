@@ -46,6 +46,13 @@ function createMeta(opts = {}) {
     if (/^INCOMING|^URGENT/.test(text)) {
       return buttons(text, [{ id: '1', title: '1 All ready' }, { id: '2 15', title: '2 Ready in 15 min' }, { id: '3', title: '3 Not available' }]);
     }
+    // Patient form link: a button that opens the one-page form
+    const fl = text.match(/^Open the patient form: (https?:\/\/\S+)\n([\s\S]*)$/);
+    if (fl) {
+      return Object.assign(base, { type: 'interactive', interactive: Object.assign(head ? { header: head } : {}, {
+        type: 'cta_url', body: { text: '📝 Patient details form. ' + fl[2] },
+        action: { name: 'cta_url', parameters: { display_text: '📝 Open form', url: fl[1] } } }) });
+    }
     // Language choice on the first Hi
     if (/Choose language \/ भाषा चुनें\.$/.test(text)) {
       return buttons(text, [{ id: 'LANG EN', title: 'English' }, { id: 'LANG HI', title: 'हिंदी (Hindi)' }]);
