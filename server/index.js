@@ -215,12 +215,16 @@ function createApp(opts = {}) {
     res.sendStatus(403);
   });
   app.post('/meta/webhook', async (req, res) => {
-    if (!meta.validSignature(req)) return res.sendStatus(403);
+    if (!meta.validSignature(req)) { console.log('meta webhook: bad signature'); return res.sendStatus(403); }
     res.sendStatus(200);
-    for (const m of meta.incoming(req.body)) {
+    const msgs = meta.incoming(req.body);
+    const fields = ((req.body && req.body.entry) || []).flatMap((e) => (e.changes || []).map((c) => c.field)).join(',');
+    console.log('meta webhook: field=' + (fields || '-') + ' messages=' + msgs.length + msgs.map((m) => ' from=..' + String(m.from).slice(-4)).join(''));
+    for (const m of msgs) {
       try {
         const reply = await inbound((role) => notify.sameNumber(notify.phoneFor(role), m.from), m.text);
         await meta.sendTo(m.from, reply);
+        console.log('meta reply sent to ..' + String(m.from).slice(-4));
       } catch (e) { console.error('meta webhook failed', e.message); }
     }
   });
