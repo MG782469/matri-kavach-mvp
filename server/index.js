@@ -380,7 +380,11 @@ function createApp(opts = {}) {
     await withSession('live', true, async (s) => { text = await S.formSubmit(s, ctx, token, req.body || {}); return text ? s : undefined; });
     if (!text) return formPage(res, 'Link expired', '<h1>Link expired</h1><p class="sub">Tap Add details in WhatsApp again.</p>', 410);
     if (meta.enabled() && notify.phoneFor('nurse')) await meta.sendTo(notify.phoneFor('nurse'), text, ROLE_LABEL.nurse).catch((e) => console.error('form reply failed', e.message));
-    formPage(res, 'Details sent', `<h1>✅ Details sent</h1><div class="ok">${esc(text)}</div><p class="sub">Go back to WhatsApp. You can open this form again to correct anything.</p>`);
+    /* Straight back to the WhatsApp chat: the summary and the SEND button are already waiting there. */
+    const wa = 'https://wa.me/' + String(process.env.WA_DISPLAY_NUMBER || '15551683953').replace(/\D/g, '');
+    res.type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url=${wa}"><title>Details sent</title>
+      <style>body{font-family:Arial,sans-serif;margin:0;background:#f5f7fa;color:#232f3e;text-align:center}main{max-width:420px;margin:0 auto;padding:60px 16px}h1{color:#1a7f45;font-size:22px}a{display:block;background:#25d366;color:#fff;font-weight:bold;text-decoration:none;padding:14px;border-radius:10px;margin-top:18px}p{color:#5d6a79}</style></head>
+      <body><main><h1>✅ Details sent</h1><p>Opening WhatsApp…</p><a href="${wa}">Back to WhatsApp</a></main><script>location.replace(${JSON.stringify(wa)});setTimeout(function(){try{window.close()}catch(e){}},800);</script></body></html>`);
   });
 
   app.get('/s/:token', async (req, res) => {
