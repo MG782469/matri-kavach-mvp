@@ -158,7 +158,8 @@ function createApp(opts = {}) {
 
   /* A reply from a phone, by WhatsApp or Telegram. isRole(role) says whether the sender plays that role. */
   async function inbound(isRole, body, info = {}) {
-    let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
+    const IDLE = 'Matri-Kavach: no referral is waiting for your reply right now.';
+    let reply = IDLE;
     info.role = isRole('nurse') ? 'nurse' : null;
     if (/^(help|menu|commands|\?)$/i.test(body)) { info.role = null; return HELP; }
     await withSession('live', true, async (s) => {
@@ -241,6 +242,12 @@ function createApp(opts = {}) {
           if (!minutes) reply = 'Please send 2 and the minutes, for example: 2 20';
           else { await S.ACTIONS.hospitalReply(s, ctx, args({ kind: 'ready-in', minutes })); reply = `Recorded: ready in ${minutes} min${tag}.`; }
         } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available). If two mothers are coming, add the case letter, for example: 1 B.';
+      }
+      /* Nothing matched: tell a hospital or an unknown number what this phone is for, instead of a bare "nothing waiting". */
+      if (reply === IDLE && !isRole('nurse')) {
+        const h = s.facilities.find((f) => (f.kind === 'hospital' || f.kind === 'fallback') && isRole(f.id));
+        if (h) { info.role = h.id; reply = 'This phone is the labour room of ' + h.short + '. No referral is waiting for you right now. When a PHC nurse sends a mother, the request and the reply buttons come here. Type CHECKIN to update tonight\'s readiness, or HELP.'; }
+        else if (!Object.keys(ROLE_LABEL).some((r) => isRole(r))) reply = 'Matri-Kavach demo: this number has no role yet. Ask the team to add it (nurse, hospital or 108), or try the web demo at ' + (notify.baseUrl() || 'the Matri-Kavach site') + '/chat';
       }
     });
     return reply;

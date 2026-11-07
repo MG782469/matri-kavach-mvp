@@ -105,7 +105,7 @@ test('live: a reply from the wrong number is ignored; "2" without minutes asks a
   const h = await boot();
   await toSent(h, 'live', 'test-key');
   let t = await (await h.form('/twilio/whatsapp', { From: 'whatsapp:+919999999999', Body: '1' })).text();
-  assert.match(t, /no referral is waiting/);
+  assert.match(t, /no referral is waiting|no role yet/);
   t = await (await h.form('/twilio/whatsapp', { From: 'whatsapp:+919000000002', Body: '2' })).text();
   assert.match(t, /minutes/);
   t = await (await h.form('/twilio/whatsapp', { From: 'whatsapp:+919000000002', Body: '2 20' })).text();
