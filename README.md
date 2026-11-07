@@ -200,7 +200,7 @@ sim/      20,000-case simulation (Python) and real-engine simulation (JS)
 ## Team InnoVerse
 
 - **Manas Girdhar**, Team Leader and Technical Lead (B.Tech, BIT Mesra). Built the routing engine, the server, the WhatsApp integration and the simulation.
-- **Moulvi Gufran**, Clinical partner (final-year MBBS). Wrote and signed the readiness checklists and reviewed every staff message.
+- **Moulvi Gufran**, Clinical partner (final-year MBBS, Government Medical College, Vizianagaram). Wrote and signed the readiness checklists and reviewed every staff message.
 
 ---
 
