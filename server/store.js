@@ -1,5 +1,7 @@
 /* Session storage. Postgres when DATABASE_URL is set, otherwise memory (local tests, no setup). */
 const clone = (x) => JSON.parse(JSON.stringify(x));
+/* A session needs the 1-second timer while any of its cases (not only the one on screen) waits for a hospital. */
+const waiting = (s) => (s.refs || []).concat(s.cur ? [s.cur] : []).some((r) => r && (r.state === 'sent' || r.state === 'ivr'));
 
 class MemoryStore {
   constructor() { this.m = new Map(); }
@@ -7,7 +9,7 @@ class MemoryStore {
   async get(id) { return this.m.has(id) ? clone(this.m.get(id)) : null; }
   async put(s) { this.m.set(s.id, clone(s)); }
   async active() {
-    return [...this.m.values()].filter((s) => s.cur && (s.cur.state === 'sent' || s.cur.state === 'ivr')).map(clone);
+    return [...this.m.values()].filter(waiting).map(clone);
   }
 }
 
@@ -30,7 +32,7 @@ class PgStore {
     await this.pool.query(
       `INSERT INTO sessions (id, data, state, updated_at) VALUES ($1, $2, $3, now())
        ON CONFLICT (id) DO UPDATE SET data = $2, state = $3, updated_at = now()`,
-      [s.id, JSON.stringify(s), s.cur ? s.cur.state : null]);
+      [s.id, JSON.stringify(s), waiting(s) ? 'sent' : s.cur ? s.cur.state : null]);
   }
   async active() {
     const r = await this.pool.query(`SELECT data FROM sessions WHERE state IN ('sent','ivr')`);

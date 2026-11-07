@@ -18,8 +18,10 @@
     { id: 'doctor', label: 'Doctor', owner: 'Receiving doctor' },
     { id: 'bloodbank', label: 'Blood bank', owner: 'Blood bank' },
     { id: 'family', label: 'Family', owner: 'Mother’s family' },
-    { id: 'driver', label: '108 driver', owner: '108 ambulance driver' },
-    { id: 'emt', label: '108 EMT', owner: '108 ambulance EMT' },
+    { id: 'driver', label: '108 driver', owner: '108 Ambulance 1 driver' },
+    { id: 'emt', label: '108 EMT', owner: '108 Ambulance 1 EMT' },
+    { id: 'driver2', label: '108 driver 2', owner: '108 Ambulance 2 driver' },
+    { id: 'emt2', label: '108 EMT 2', owner: '108 Ambulance 2 EMT' },
     { id: 'district', label: 'District officer', owner: 'District MH officer' },
     { id: 'asha', label: 'PHC and ASHA', owner: 'PHC and ASHA Sunita' }
   ];
@@ -40,6 +42,18 @@
   function cur() { return ST && ST.cur; }
   function typeOf() { var id = (cur() && cur().type) || 'bleeding'; return D.emergencyTypes.filter(function (t) { return t.id === id; })[0]; }
   function isHospital(id) { var f = fac(id); return f && (f.kind === 'hospital' || f.kind === 'fallback'); }
+  /* Two mothers can be open at once. The nurse screen shows one (cur); a hospital phone shows the case that asked it. */
+  function openRefs() { return ((ST && ST.refs) || []).filter(function (r) { return r.state !== 'closed'; }); }
+  function asking(r, role) { return Boolean(r && ((r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined)) || (r.backup === role && r.proposal !== role && !r.backupYes && ['sent', 'ivr'].indexOf(r.state) !== -1))); }
+  function caseAt(role) {
+    if (!ST || role === 'nurse') return cur();
+    var refs = ST.refs || [], c = cur();
+    if (asking(c, role)) return c;
+    var a = refs.filter(function (r) { return asking(r, role); })[0]; if (a) return a;
+    var d = refs.filter(function (r) { return (r.confirmed || r.destination) === role || r.backup === role || r.proposal === role; });
+    return d.length ? d[d.length - 1] : c;
+  }
+  function tagOf(r) { return r && r.tag && (ST.refs || []).length > 1 ? 'Mother ' + r.tag + ' · ' : ''; }
 
   /* ---------- messages for one phone ---------- */
   function nurseMsgs() {
@@ -50,7 +64,7 @@
     var list = (ST.outbox || []).filter(function (o) { return o.role === role; }).map(function (o) {
       return { dir: 'in', text: o.text, at: o.at, call: /^No-reply call/.test(o.label || ''), incoming: /^INCOMING/.test(o.text || ''), sms: o.channel === 'sms', cancel: /^CANCELLED/.test(o.text || '') };
     });
-    (ECHO[role] || []).forEach(function (e) { if (!ST.cur || e.ref === ST.cur.id) list.push({ dir: 'out', text: e.text, at: e.at }); });
+    (ECHO[role] || []).forEach(function (e) { list.push({ dir: 'out', text: e.text, at: e.at }); });
     return list.sort(function (a, b) { return a.at - b.at; });
   }
   function msgsFor(role) { return role === 'nurse' ? nurseMsgs() : phoneMsgs(role); }
@@ -69,15 +83,16 @@
     if (step === 'close' && r && r.arrived === 'Yes' && !r.outcome) return { btns: [['outcome', 'Delivered', '1 Delivered'], ['outcome', 'Other', '2 Other']] };
     return null;
   }
-  function isBackup(role) { var r = cur(); return Boolean(r && r.backup === role && r.proposal !== role && !r.backupYes && ['sent', 'ivr'].indexOf(r.state) !== -1); }
-  function hospitalCanReply(role) { var r = cur(); return Boolean(r && ((r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined)) || isBackup(role))); }
+  function isBackup(role) { var r = caseAt(role); return Boolean(r && r.backup === role && r.proposal !== role && !r.backupYes && ['sent', 'ivr'].indexOf(r.state) !== -1); }
+  function hospitalCanReply(role) { var r = caseAt(role); return Boolean(r && ((r.proposal === role && ['sent', 'routed', 'ivr', 'fallback'].indexOf(r.state) !== -1 && !(r.state === 'fallback' && r.fallbackDeclined)) || isBackup(role))); }
 
   function drillPending(role) { var d = ST.drill; return d && !d.done && d.ids.indexOf(role) !== -1 && d.replies[role] == null && !hospitalCanReply(role); }
   /* Buttons a hospital phone shows after it confirmed: team ready, discharge, feedback. Plus the drill reply. */
   function hospitalAfter(role) {
     if (!isHospital(role)) return [];
     if (drillPending(role)) return [['drillok', '', '1 Drill received']];
-    var r = cur(); if (!r || (r.confirmed || r.destination) !== role) return [];
+    var r = (ST.refs || []).filter(function (x) { return (x.confirmed || x.destination) === role && ((x.state === 'confirmed' && !x.teamReadyAt && !x.arrived) || (x.state === 'closed' && x.arrived === 'Yes' && !x.dischargedAt) || (x.dischargedAt && !x.feedback)); })[0];
+    if (!r) return [];
     if (r.state === 'confirmed' && !r.teamReadyAt && !r.arrived) return [['team', '', 'Team ready at the door']];
     if (r.dischargedAt && !r.feedback) return [r.confirmed || r.destination, 'The hospital can tell the PHC if the referral was on time. This is for learning at the PHC monthly review.'];
     if (r.state === 'closed' && r.arrived === 'Yes' && !r.dischargedAt) return [['discharge', '', 'Mark discharged home']];
@@ -97,10 +112,25 @@
     return '<div class="grp ' + m.dir + '"><div class="bub">' + body + '<span class="meta">' + clock(m.at) + tk + '</span></div>' + (extra || '') + '</div>';
   }
 
+  /* Nurse: one chip per open mother, tap to switch; + New mother starts another referral while the others keep running. */
+  function caseBar() {
+    var open = openRefs(), c = cur();
+    if (!open.length) return '';
+    var st = function (r) {
+      var h = fac(r.confirmed || r.proposal || r.destination), at = h ? h.short : '';
+      return { referred: 'details', routed: 'proposed ' + at, sent: 'waiting ' + at, ivr: 'calling ' + at, confirmed: at + ' ✓', fallback: 'district alerted' }[r.state] || r.state;
+    };
+    var ty = function (r) { var t = D.emergencyTypes.filter(function (x) { return x.id === r.type; })[0]; return t ? t.short : r.type; };
+    return open.map(function (r) {
+      return '<button data-act="case" data-v="' + esc(r.id) + '" aria-pressed="' + String(Boolean(c && c.id === r.id)) + '"><b>' + esc(r.tag || '•') + '</b> ' + esc(ty(r)) + '<small>' + esc(st(r)) + '</small></button>';
+    }).join('') + '<button data-act="newcase" class="nc">+ New mother</button>';
+  }
+
   function renderMsgs() {
     var el = $('msgs');
     var near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    var list = msgsFor(VIEW), r = cur(), html = '<div class="day">Today</div>';
+    var list = msgsFor(VIEW), r = caseAt(VIEW), html = '<div class="day">Today</div>';
+
     html += '<div class="sysmsg">🔒 Messages here are the same texts Matri-Kavach sends on WhatsApp. Synthetic demo data.</div>';
     if (!list.length && VIEW === 'nurse') html += '<div class="sysmsg">Say <b>Hi</b> to Matri-Kavach to start. Type it below or tap the Hi chip.</div>';
     if (isHospital(VIEW)) html += checkinBar(VIEW);
@@ -127,7 +157,7 @@
       var nb = nurseButtons();
       if (nb && nb.extra && list.length && list[list.length - 1].dir === 'in') html += bubble({ dir: 'in', text: nb.extra, at: now() }, '<div class="qr">' + nb.btns.map(btnHtml).join('') + '</div>');
     }
-    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call' + (r.backup ? ', unless backup ' + esc(fac(r.backup).short) + ' already said ready' : '') + '. ' + (ROLE && ROLE !== 'nurse' ? '' : '<button data-act="skip">Skip 2 min (demo)</button>') + '</div>';
+    if (r && r.state === 'sent' && (VIEW === 'nurse' || VIEW === r.proposal)) html += '<div class="sysmsg">⏱ ' + esc(tagOf(r)) + esc(fac(r.proposal).short) + ' has <b data-cd>02:00</b> to reply. If silent, it gets an automatic call' + (r.backup ? ', unless backup ' + esc(fac(r.backup).short) + ' already said ready' : '') + '. ' + (ROLE && ROLE !== 'nurse' ? '' : '<button data-act="skip">Skip 2 min (demo)</button>') + '</div>';
     if (r && isBackup(VIEW)) html += '<div class="sysmsg">⏱ You are the <b>backup</b>. ' + esc(fac(r.proposal).short) + ' is nearer and has priority until <b data-cd>02:00</b> runs out. Please reply now anyway.</div>';
     if (r && r.backup && r.backupYes && VIEW === r.backup && ['sent', 'ivr'].indexOf(r.state) !== -1) html += '<div class="sysmsg">✓ Your reply is recorded as backup. Waiting for ' + esc(fac(r.proposal).short) + '.</div>';
     if (r && r.state === 'fallback' && VIEW === 'nurse') html += '<div class="sysmsg warnmsg">⚠ ' + esc(fac('mc').short) + (r.fallbackDeclined ? ' cannot confirm. The district and clinicians are deciding.' : ' is proposed only, not accepted. Waiting for it to confirm.') + '</div>';
@@ -160,6 +190,7 @@
   }
 
   /* ---------- phone picker with unread badges ---------- */
+  function renderCases() { var el = $('cases'); if (!el) return; el.innerHTML = VIEW === 'nurse' ? caseBar() : ''; el.hidden = !el.innerHTML; }
   function renderPhones() {
     $('phones').innerHTML = phones().map(function (p) {
       var unread = Math.max(0, countIn(p.id) - (SEEN[p.id] || 0));
@@ -173,7 +204,7 @@
     $('phones').hidden = Boolean(ROLE);
     var nurseNew = VIEW === 'nurse' && (!ST.chat.length || ST.step === 'done');
     var ashaIdle = VIEW === 'asha' && (!cur() || ST.step === 'done' || ST.step === 'start');
-    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="BLEED B+">BLEED B+</button><button data-act="mcall">📞 Missed call</button>' + (ROLE ? '' : '<button data-act="auto">▶ Auto-play</button>') + '<button data-act="help">How to test</button>'
+    $('sugg').innerHTML = nurseNew ? '<button data-act="say" data-v="Hi">Hi</button><button data-act="say" data-v="BLEED B+">BLEED B+</button><button data-act="mcall">📞 Missed call</button>' + (ROLE ? '' : '<button data-act="auto">▶ Auto-play</button><button data-act="two">👥 Two at once</button>') + '<button data-act="help">How to test</button>'
       : ashaIdle ? '<button data-act="home-open">🏠 Home emergency: share location</button>' : '';
   }
 
@@ -210,7 +241,8 @@
     html += '<div class="panel"><h2>Referral steps</h2><ol class="steps">' + steps.map(function (s, i) { return '<li class="' + (i < stepsDone ? 'done' : i === stepsDone ? 'now' : '') + '">' + esc(s) + '</li>'; }).join('') + '</ol></div>';
     if (r) {
       var dest = r.destination || r.confirmed || r.proposal;
-      html += '<div class="panel"><h2>This case</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd><dt>State</dt><dd>' + esc(r.state === 'fallback' ? 'escalated, medical college not yet confirmed' : r.state) + '</dd>' +
+      var amb = (D.ambulances || []).filter(function (x) { return x.id === r.amb; })[0];
+      html += '<div class="panel"><h2>This case' + (r.tag && openRefs().length > 1 ? ' (Mother ' + esc(r.tag) + ', ' + openRefs().length + ' open)' : '') + '</h2><dl class="kv"><dt>Referral</dt><dd>' + esc(r.id) + '</dd>' + (amb ? '<dt>Ambulance</dt><dd>' + esc(amb.label) + '</dd>' : '') + '<dt>State</dt><dd>' + esc(r.state === 'fallback' ? 'escalated, medical college not yet confirmed' : r.state) + '</dd>' +
         (dest && fac(dest) ? '<dt>Hospital</dt><dd>' + esc(fac(dest).name) + '</dd>' : '') +
         (r.backup && fac(r.backup) ? '<dt>Backup</dt><dd>' + esc(fac(r.backup).short) + (r.backupYes ? ', said ready' : ', asked at the same time') + '</dd>' : '') +
         (r.origin ? '<dt>Pickup</dt><dd>' + esc(r.origin.name) + ' (home, ASHA)</dd>' : '') +
@@ -236,7 +268,7 @@
       '<dt>Hospital</dt><dd>Emergency, ETA, blood group, nurse facts</dd>' +
       '<dt>Doctor</dt><dd>Private summary link, expires</dd>' +
       '<dt>Blood bank</dt><dd>Blood group and hospital only</dd>' +
-      '<dt>108 driver</dt><dd>Pickup and hospital only, no medical details</dd>' +
+      '<dt>108 driver</dt><dd>Case ID, pickup, hospital and a map link only, no medical details. Each mother gets her own ambulance</dd>' +
       '<dt>108 EMT</dt><dd>Nurse facts and blood group, for care on the way</dd>' +
       '<dt>Family</dt><dd>Hospital and ETA only, no medical details</dd>' +
       '<dt>District</dt><dd>Case ID and alerts, no patient name</dd></dl></div>';
@@ -255,6 +287,7 @@
     var svg = '<svg class="map" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="District map, synthetic">' +
       '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="var(--mk-mapbg)" rx="2"/>' +
       (dest ? line(dest, false) : '') + (r && r.backup ? line(r.backup, true) : '') +
+      openRefs().filter(function (x) { return !r || x.id !== r.id; }).map(function (x) { var f = fac(x.confirmed || x.proposal), o = x.origin || D.startPoint; return f && f.x != null ? '<line x1="' + o.x + '" y1="' + o.y + '" x2="' + f.x + '" y2="' + f.y + '" stroke="var(--mk-sub)" stroke-width="0.9" stroke-dasharray="0.8 1"/><text x="' + ((o.x + f.x) / 2) + '" y="' + ((o.y + f.y) / 2 - 1) + '" font-size="2.6" fill="var(--mk-sub)">' + esc(x.tag || '') + '</text>' : ''; }).join('') +
       fs.map(function (f) { return '<g><circle cx="' + f.x + '" cy="' + f.y + '" r="2.2" fill="' + col(f) + '"/><text x="' + (f.x + 3) + '" y="' + (f.y - 2) + '" font-size="2.8" fill="var(--mk-ink)">' + esc(f.short) + '</text></g>'; }).join('') +
       (D.villages || []).map(function (v) { return '<g><rect x="' + (v.x - 1.2) + '" y="' + (v.y - 1.2) + '" width="2.4" height="2.4" fill="var(--mk-vil)"/><text x="' + (v.x + 2.5) + '" y="' + (v.y + 1) + '" font-size="2.8" fill="var(--mk-sub)">' + esc(v.name) + '</text></g>'; }).join('') +
       '<g><path d="M' + P.x + ' ' + (P.y - 2.6) + ' l2.4 4.2 h-4.8 z" fill="var(--mk-phc)"/><text x="' + (P.x + 3) + '" y="' + (P.y + 1.2) + '" font-size="3.2" font-weight="700" fill="var(--mk-ink)">' + esc(r && r.origin ? r.origin.name + ' (home)' : D.startPoint.name) + '</text></g>' +
@@ -283,18 +316,18 @@
 
   /* ---------- automatic call screen ---------- */
   function renderCall() {
-    var r = cur(), show = r && r.state === 'ivr' && VIEW === r.proposal;
+    var r = caseAt(VIEW), show = r && r.state === 'ivr' && VIEW === r.proposal;
     $('call').hidden = !show;
     if (show) $('call-script').textContent = M.fill('ivrScript', { type: typeOf().short, eta: MK.engine.etaMinutes(fac(r.proposal).km, D) });
   }
 
   function render() {
     if (!ST) return;
-    renderPhones(); renderMsgs(); renderSide(); renderCall();
+    renderPhones(); renderCases(); renderMsgs(); renderSide(); renderCall();
   }
 
   function countdown() {
-    var r = cur(); if (!r || r.state !== 'sent') return;
+    var r = caseAt(VIEW); if (!r || r.state !== 'sent') return;
     var left = Math.max(0, Math.ceil((r.timerStart + ST.replyWindowSec * 1000 - now()) / 1000));
     var txt = '0' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
     document.querySelectorAll('[data-cd]').forEach(function (c) { c.textContent = txt; });
@@ -316,6 +349,7 @@
     var dr = ST.drill && !ST.drill.done;
     openSheet('<h3>Demo menu</h3>' +
       '<button class="opt" data-act="auto"><span>▶ Auto-play the Lakshmi case<small>The whole referral plays by itself across all phones, about 1 minute</small></span></button>' +
+      '<button class="opt" data-act="two"><span>👥 Demo: two mothers at the same time<small>Heavy bleeding and fits arrive together: two case IDs, two hospitals, two ambulances with map links</small></span></button>' +
       (r && r.state === 'sent' ? '<button class="opt" data-act="skip"><span>Skip 2 minutes<small>See what happens when the hospital stays silent</small></span></button>' : '') +
       '<button class="opt" data-scn="confirms"><span>New case: hospital confirms</span></button>' +
       '<button class="opt" data-scn="nobody"><span>New case: no hospital ready<small>Nobody passes the checklist tonight</small></span></button>' +
@@ -460,7 +494,8 @@
     fetch('/api/state?sid=' + SID, { headers: headers() }).then(function (r) { if (r.status === 401 && TOKEN) { logout(); return {}; } return r.json(); }).then(function (j) { if (!BUSY && j.facilities) sync(j); }).catch(function () {});
   }
   function note(text, live) { var el = $('note'); el.textContent = text; el.className = 'note' + (live ? ' live' : ''); }
-  function echo(role, text) { var r = cur(); (ECHO[role] = ECHO[role] || []).push({ text: text, at: now(), ref: r && r.id }); }
+  function echo(role, text) { var r = caseAt(role); (ECHO[role] = ECHO[role] || []).push({ text: text, at: now(), ref: r && r.id }); }
+  function refFor(role) { var r = caseAt(role); return r ? r.id : undefined; }
 
   function show(phone) { if (root.scrollY > 0) root.scrollTo(0, 0); VIEW = phone; SEEN[VIEW] = countIn(VIEW); closeSheet(); LAST = ''; render(); var el = $('msgs'); el.scrollTop = el.scrollHeight; try { root.localStorage.setItem('mk-chat-view', phone); } catch (e) {} }
 
@@ -535,8 +570,11 @@
       else if (a === 'reply') {
         var kv2 = v.split(':'), mins = kv2[1] ? Number(kv2[1]) : null;
         echo(VIEW, kv2[0] === 'all-ready' ? '1 All ready' : kv2[0] === 'not-available' ? '3 Not available' : '2 Ready in ' + mins + ' min');
-        act('hospitalReply', { kind: kv2[0], minutes: mins, facility: VIEW });
+        act('hospitalReply', { kind: kv2[0], minutes: mins, facility: VIEW, ref: refFor(VIEW) });
       }
+      else if (a === 'case') act('switchCase', { id: v });
+      else if (a === 'newcase') act('newCase', {});
+      else if (a === 'two') { closeSheet(); ECHO = {}; act('reset', { scenario: 'confirms' }).then(function () { return idleAct('twoAtOnce', {}); }).then(function () { show('nurse'); note('Two mothers at once: Mother A (heavy bleeding) and Mother B (fits). Each has her own case ID, hospital and ambulance. Open 108 driver and 108 driver 2 to see the map links.'); }); }
       else if (a === 'details-clear') document.querySelectorAll('.sheet input').forEach(function (el) { el.value = ''; });
       else if (a === 'settings') settingsSheet();
       else if (a === 'lists') listsSheet();
@@ -553,15 +591,15 @@
       else if (a === 'login-send') loginSend();
       else if (a === 'login-verify') loginVerify();
       else if (a === 'logout') logout();
-      else if (a === 'ivr') { echo(VIEW, v === '1' ? 'Answered the call and pressed 1: all ready' : 'Did not answer the call'); act('ivrAnswer', { answer: v }); }
+      else if (a === 'ivr') { echo(VIEW, v === '1' ? 'Answered the call and pressed 1: all ready' : 'Did not answer the call'); act('ivrAnswer', { answer: v, facility: VIEW, ref: refFor(VIEW) }); }
       else if (a === 'arrived') act('arrived', { value: v });
       else if (a === 'ready') act('readyCheck', { value: v });
       else if (a === 'missing') act('readyCheck', { missing: v });
-      else if (a === 'team') { echo(VIEW, 'Team ready at the door'); act('teamReady', {}); }
-      else if (a === 'discharge') { echo(VIEW, 'Discharged home'); act('discharge', {}); }
+      else if (a === 'team') { echo(VIEW, 'Team ready at the door'); act('teamReady', { facility: VIEW }); }
+      else if (a === 'discharge') { echo(VIEW, 'Discharged home'); act('discharge', { facility: VIEW }); }
       else if (a === 'report') { closeSheet(); act('monthlyReport', {}).then(function () { show('district'); }); }
       else if (a === 'outcome') act('outcome', { value: v });
-      else if (a === 'fb') { echo(VIEW, { 1: '1 On time', 2: '2 Should have come earlier', 3: '3 Could have been managed at the PHC' }[v]); act('feedback', { value: v }); }
+      else if (a === 'fb') { echo(VIEW, { 1: '1 On time', 2: '2 Should have come earlier', 3: '3 Could have been managed at the PHC' }[v]); act('feedback', { value: v, facility: VIEW }); }
       else if (a === 'full') { echo(VIEW, v === '1' ? 'FULL' : 'OPEN'); act('setFull', { facility: VIEW, on: v === '1' }); }
       else if (a === 'full-dh') { closeSheet(); act('setFull', { facility: 'dh', on: true }).then(function () { show('dh'); }); }
       else if (a === 'drill') { closeSheet(); act('drill', {}).then(function () { show('dh'); }); }
@@ -583,16 +621,16 @@
       var m = text.match(/^\s*([123])\D*(\d+)?/);
       if (m) {
         echo(VIEW, text);
-        if (m[1] === '1') act('hospitalReply', { kind: 'all-ready', facility: VIEW });
-        else if (m[1] === '3') act('hospitalReply', { kind: 'not-available', facility: VIEW });
-        else act('hospitalReply', { kind: 'ready-in', minutes: Number(m[2]) || 15, facility: VIEW });
+        if (m[1] === '1') act('hospitalReply', { kind: 'all-ready', facility: VIEW, ref: refFor(VIEW) });
+        else if (m[1] === '3') act('hospitalReply', { kind: 'not-available', facility: VIEW, ref: refFor(VIEW) });
+        else act('hospitalReply', { kind: 'ready-in', minutes: Number(m[2]) || 15, facility: VIEW, ref: refFor(VIEW) });
         return;
       }
     }
     var ha = hospitalAfter(VIEW), h0 = ha[0] && ha[0][0];
-    if (h0 === 'team' && /^team/i.test(text)) { echo(VIEW, text); act('teamReady', {}); return; }
-    if (h0 === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', {}); return; }
-    if (h0 === 'fb' && /^[123]\b/.test(text)) { echo(VIEW, text); act('feedback', { value: text[0] }); return; }
+    if (h0 === 'team' && /^team/i.test(text)) { echo(VIEW, text); act('teamReady', { facility: VIEW }); return; }
+    if (h0 === 'discharge' && /^disch/i.test(text)) { echo(VIEW, text); act('discharge', { facility: VIEW }); return; }
+    if (h0 === 'fb' && /^[123]\b/.test(text)) { echo(VIEW, text); act('feedback', { value: text[0], facility: VIEW }); return; }
     if (h0 === 'drillok' && /^1\b/.test(text)) { echo(VIEW, text); act('drillReply', { facility: VIEW }); return; }
     if (isHospital(VIEW) && /^(full|open)\b/i.test(text)) { echo(VIEW, text); act('setFull', { facility: VIEW, on: /^full/i.test(text) }); return; }
     echo(VIEW, text); LAST = ''; render();

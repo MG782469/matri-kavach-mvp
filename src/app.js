@@ -172,6 +172,14 @@
     var chat = S.chat.map(function (m) { return '<div class="bub ' + (m.from === 'nurse' ? 'out' : 'in') + '">' + esc(m.text) + '</div>'; }).join('');
     var body = '';
     var r = S.cur;
+    // Several mothers at once (live server): one chip per open case, tap to switch; + New mother starts another referral.
+    var open = (S.refs || []).filter(function (x) { return x.state !== 'closed'; });
+    if (LIVE && open.length) {
+      chat = '<div class="opts">' + open.map(function (x) {
+        var t = D.emergencyTypes.filter(function (y) { return y.id === x.type; })[0], h = fac(x.confirmed || x.proposal || x.destination);
+        return '<button class="chip" data-act="case" data-id="' + esc(x.id) + '" aria-pressed="' + String(Boolean(r && r.id === x.id)) + '">Mother ' + esc(x.tag || '') + ': ' + esc(t ? t.short : x.type) + (h ? ', ' + esc(h.short) + ' ' + esc(x.state) : '') + '</button>';
+      }).join('') + '<button class="chip" data-act="newcase">+ New mother</button></div>' + chat;
+    }
     if (S.step === 'start') {
       body = '<div class="opts">' + D.emergencyTypes.map(function (t) { return '<button class="opt" data-act="type" data-id="' + t.id + '">' + esc(t.label) + '</button>'; }).join('') + '</div>';
     } else if (S.step === 'details') {
@@ -314,6 +322,9 @@
       var b = e.target.closest('[data-act]'); if (!b) return;
       var a = b.dataset.act;
       if (a === 'type') startReferral(b.dataset.id);
+      else if (a === 'case') act('switchCase', { id: b.dataset.id });
+      else if (a === 'newcase') act('newCase', {});
+      else if (a === 'two') { if (LIVE) act('reset', { scenario: 'confirms' }).then(function () { return act('twoAtOnce', {}); }); }
       else if (a === 'details') submitDetails();
       else if (a === 'change') changeProposal();
       else if (a === 'send') send();

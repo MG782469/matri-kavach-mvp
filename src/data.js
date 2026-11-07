@@ -5,11 +5,17 @@
     speedKmh: 30,
     detourFactor: 1.4,
     replyWindowSec: 120,
-    startPoint: { id: 'phc', name: 'PHC Rampur', nurse: 'Kavitha', x: 20, y: 50 },
+    startPoint: { id: 'phc', name: 'PHC Rampur', nurse: 'Kavitha', x: 20, y: 50, lat: 23.150, lng: 85.296 },
+    // lat/lng are DEMO coordinates for the map link in the 108 driver message. In a pilot they come from ABDM HFR.
+    // Two 108 ambulances, so two mothers at the same time each get their own ambulance, driver and EMT.
+    ambulances: [
+      { id: 'amb1', label: '108 Ambulance 1', driver: 'driver', emt: 'emt' },
+      { id: 'amb2', label: '108 Ambulance 2', driver: 'driver2', emt: 'emt2' }
+    ],
     // Synthetic map (km grid) for the district view and for ASHA home emergencies. Not real places.
     villages: [
-      { id: 'bhuiyan', name: 'Village Bhuiyan', x: 12, y: 62 },
-      { id: 'kesla', name: 'Village Kesla', x: 33, y: 40 }
+      { id: 'bhuiyan', name: 'Village Bhuiyan', x: 12, y: 62, lat: 23.042, lng: 85.218 },
+      { id: 'kesla', name: 'Village Kesla', x: 33, y: 40, lat: 23.240, lng: 85.423 }
     ],
     bloodGroups: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'],
     // Items that can be sent from another hospital (idea: inter-hospital supply). OFF by default, not approved.
@@ -25,8 +31,10 @@
       { role: 'mc', label: 'GMC Rajnagar emergency desk', phone: '90000 00005' },
       { role: 'doctor', label: 'Receiving doctor', phone: '90000 00006' },
       { role: 'bloodbank', label: 'Blood bank', phone: '90000 00007' },
-      { role: 'driver', label: '108 driver', phone: '90000 00008' },
-      { role: 'emt', label: '108 EMT', phone: '90000 00009' },
+      { role: 'driver', label: '108 driver, Ambulance 1', phone: '90000 00008' },
+      { role: 'emt', label: '108 EMT, Ambulance 1', phone: '90000 00009' },
+      { role: 'driver2', label: '108 driver, Ambulance 2', phone: '90000 00013' },
+      { role: 'emt2', label: '108 EMT, Ambulance 2', phone: '90000 00014' },
       { role: 'family', label: 'Family', phone: '90000 00010' },
       { role: 'district', label: 'District officer', phone: '90000 00011' },
       { role: 'asha', label: 'ASHA', phone: '90000 00012' }
@@ -59,22 +67,22 @@
     ],
     itemGroups: ['Staff', 'Rooms and beds', 'Blood and drugs', 'Equipment and lab'],
     facilities: [
-      { id: 'chc', name: 'CHC Sonpur', short: 'CHC Sonpur', km: 9, role: 'CHC', kind: 'hospital', x: 27, y: 45, nurses: 1, hfr: 'IN0000DEMO01',
+      { id: 'chc', name: 'CHC Sonpur', short: 'CHC Sonpur', km: 9, role: 'CHC', kind: 'hospital', x: 27, y: 45, lat: 23.195, lng: 85.365, nurses: 1, hfr: 'IN0000DEMO01',
         bloodStock: { 'O+': 2 },
         blood: 'O+ 2 units', who: 'Duty nurse', ini: 'S',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: false, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: false, hdu: false, newborn: false, antibiotics: true, usg: false, paed: false, sncu: false } } },
-      { id: 'dh', name: 'District Hospital Devgarh', short: 'DH Devgarh', km: 21, role: 'Labour room in-charge', kind: 'hospital', x: 40, y: 57, nurses: 3, hfr: 'IN0000DEMO02',
+      { id: 'dh', name: 'District Hospital Devgarh', short: 'DH Devgarh', km: 21, role: 'Labour room in-charge', kind: 'hospital', x: 40, y: 57, lat: 23.087, lng: 85.492, nurses: 3, hfr: 'IN0000DEMO02',
         bloodStock: { 'A+': 4, 'B+': 6, 'O+': 5, 'AB+': 1, 'O-': 1 },
         blood: 'B+ 6 units', who: 'Sister Anjali', ini: 'A',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: false, newborn: true, antibiotics: true, usg: true, paed: true, sncu: true } } },
-      { id: 'sdh', name: 'Sub-district Hospital Kheri', short: 'SDH Kheri', km: 25, role: 'Labour room in-charge', kind: 'hospital', x: 10, y: 27, nurses: 2, hfr: 'IN0000DEMO03',
+      { id: 'sdh', name: 'Sub-district Hospital Kheri', short: 'SDH Kheri', km: 25, role: 'Labour room in-charge', kind: 'hospital', x: 10, y: 27, lat: 23.357, lng: 85.198, nurses: 2, hfr: 'IN0000DEMO03',
         bloodStock: { 'A+': 2, 'B+': 3, 'O+': 4, 'B-': 1, 'A-': 1 },
         blood: 'B+ 3 units', who: 'Sister Rekha', ini: 'R',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,
           mgso4: true, antihtn: true, airway: true, lab: true, hdu: true, newborn: true, antibiotics: true, usg: true, paed: true, sncu: true } } },
-      { id: 'mc', name: 'Govt Medical College Rajnagar', short: 'GMC Rajnagar', km: 52, role: 'Obstetrics emergency desk', kind: 'fallback', x: 70, y: 34, nurses: 6, hfr: 'IN0000DEMO04',
+      { id: 'mc', name: 'Govt Medical College Rajnagar', short: 'GMC Rajnagar', km: 52, role: 'Obstetrics emergency desk', kind: 'fallback', x: 70, y: 34, lat: 23.294, lng: 85.786, nurses: 6, hfr: 'IN0000DEMO04',
         bloodStock: { 'A+': 12, 'B+': 21, 'O+': 18, 'AB+': 4, 'A-': 2, 'B-': 2, 'O-': 3, 'AB-': 1 },
         blood: 'B+ 21 units', who: 'Duty registrar', ini: 'G',
         checkin: { shift: 'night', items: { blood: true, obstetrician: true, anaesthetist: true, theatre: true, uterotonics: true, iv: true, bed: true,

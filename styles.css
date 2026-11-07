@@ -68,3 +68,4 @@ th{color:var(--grey);font-weight:bold;font-size:12px}
 .log li:first-child{border-top:0;padding-top:0}
 .tg .opts a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .tg code{font-size:13px;overflow-wrap:anywhere;user-select:all}
+.live-only{display:none}.is-live .live-only{display:inline-block}

@@ -135,16 +135,32 @@ function createApp(opts = {}) {
     let reply = 'Matri-Kavach: no referral is waiting for your reply right now.';
     await withSession('live', true, async (s) => {
       const c = s.cur;
-      const dest = c && (c.confirmed || c.destination);
-      if (dest && isRole(dest) && /^team\b/i.test(body)) { await S.ACTIONS.teamReady(s, ctx); reply = 'Recorded: team ready at the door. The PHC and the 108 EMT have been told.'; return; }
-      if (dest && isRole(dest) && /^disch/i.test(body)) { await S.ACTIONS.discharge(s, ctx); reply = 'Recorded: discharged home. The PHC and ASHA have the back-referral.'; return; }
-      if (dest && isRole(dest) && c.dischargedAt && !c.feedback && /^[123]\b/.test(body)) { await S.ACTIONS.feedback(s, ctx, { value: body[0] }); reply = 'Thank you. Your feedback was sent to the PHC.'; return; }
+      /* Several mothers can be open at once: find the case this hospital is answering ("1 MK-123456" or "1 B" names one). */
+      const named = S.refInText(s, body);
+      const hospIds = s.facilities.filter((f) => (f.kind === 'hospital' || f.kind === 'fallback') && isRole(f.id)).map((f) => f.id);
+      const caseOf = (action) => {
+        for (const ref of named ? [named, null] : [null]) {
+          for (const id of hospIds) {
+            const x = S.refById(s, S.caseFor(s, action, { facility: id, ref }, Boolean(ref)));
+            const mine = x && (action === 'hospitalReply' ? x.proposal === id || x.backup === id : (x.confirmed || x.destination) === id);
+            if (mine) return { ref: x.id, facility: id };
+          }
+        }
+        return null;
+      };
+      const idOf = (k) => { const r = k && S.refById(s, k.ref); return r ? ' (case ' + r.id + ')' : ''; };
+      const tc = /^team\b/i.test(body) && caseOf('teamReady');
+      if (tc) { await S.ACTIONS.teamReady(s, ctx, tc); reply = 'Recorded: team ready at the door' + idOf(tc) + '. The PHC and the 108 EMT have been told.'; return; }
+      const dc = /^disch/i.test(body) && caseOf('discharge');
+      if (dc) { await S.ACTIONS.discharge(s, ctx, dc); reply = 'Recorded: discharged home' + idOf(dc) + '. The PHC and ASHA have the back-referral.'; return; }
+      const fc = /^[123]\b/.test(body) && caseOf('feedback');
+      if (fc) { await S.ACTIONS.feedback(s, ctx, Object.assign({ value: body[0] }, fc)); reply = 'Thank you. Your feedback was sent to the PHC.'; return; }
       const hosp = s.facilities.find((f) => f.kind === 'hospital' && isRole(f.id));
       if (hosp && /^full\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: true }); reply = hosp.full ? 'Recorded: FULL for 2 hours. Reply OPEN when you can take patients again.' : 'Please answer the referral first: reply 3 if you cannot take her.'; return; }
       if (hosp && /^open\b/i.test(body)) { await S.ACTIONS.setFull(s, ctx, { facility: hosp.id, on: false }); reply = 'Recorded: open for referrals again.'; return; }
       const drillFor = s.drill && !s.drill.done && s.drill.ids.find((id) => s.drill.replies[id] == null && isRole(id));
       if (drillFor && /^1\b/.test(body) && !(c && ['sent', 'ivr', 'routed'].includes(c.state))) { await S.ACTIONS.drillReply(s, ctx, { facility: drillFor }); reply = 'Drill reply recorded. Thank you.'; return; }
-      if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step))) {
+      if (isRole('nurse') && (!c || ['done', 'proposed', 'close', 'callback'].includes(s.step) || /^(new|case\s+[a-z]|bleed|pph|fits?|ecl)\b/i.test(body))) {
         const n = s.chat.length;
         await S.ACTIONS.nurseText(s, ctx, { text: body });
         const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
@@ -152,19 +168,21 @@ function createApp(opts = {}) {
         reply = (next && !bot.includes(next) ? bot.concat([next]) : bot).join('\n') || reply;
         if (s.step === 'close' || s.step === 'done' || !c || bot.length) return;
       }
-      if (!c) return;
-      const asked = ['sent', 'ivr', 'routed', 'fallback'].includes(c.state) && isRole(c.proposal) ? c.proposal
-        : ['sent', 'ivr'].includes(c.state) && c.backup && !c.backupYes && isRole(c.backup) ? c.backup : null;
-      if (asked) {
-        const isBackup = asked !== c.proposal;
-        if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'all-ready', facility: asked }); reply = isBackup ? 'Thank you. Recorded: ready, as backup. The nearer hospital has priority; we will tell you.' : 'Thank you. Recorded: ALL READY.'; }
-        else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'not-available', facility: asked }); reply = isBackup ? 'Recorded: not available.' : 'Recorded: not available. We are rerouting.'; }
+      const hc = caseOf('hospitalReply');
+      if (hc) {
+        const hr = S.refById(s, hc.ref);
+        const asked = hc.facility;
+        const isBackup = asked !== hr.proposal;
+        const tag = idOf(hc);
+        const args = (x) => Object.assign({ facility: asked, ref: hc.ref }, x);
+        if (/^1/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, args({ kind: 'all-ready' })); reply = isBackup ? 'Thank you. Recorded: ready, as backup' + tag + '. The nearer hospital has priority; we will tell you.' : 'Thank you. Recorded: ALL READY' + tag + '.'; }
+        else if (/^3/.test(body)) { await S.ACTIONS.hospitalReply(s, ctx, args({ kind: 'not-available' })); reply = isBackup ? 'Recorded: not available' + tag + '.' : 'Recorded: not available' + tag + '. We are rerouting.'; }
         else if (/^2/.test(body)) {
           const m = body.match(/\d+/g);
           const minutes = m && m[1] ? Number(m[1]) : null;
           if (!minutes) reply = 'Please send 2 and the minutes, for example: 2 20';
-          else { await S.ACTIONS.hospitalReply(s, ctx, { kind: 'ready-in', minutes, facility: asked }); reply = `Recorded: ready in ${minutes} min.`; }
-        } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available).';
+          else { await S.ACTIONS.hospitalReply(s, ctx, args({ kind: 'ready-in', minutes })); reply = `Recorded: ready in ${minutes} min${tag}.`; }
+        } else reply = 'Reply 1 (all ready), 2 and minutes such as 2 20 (ready later), or 3 (not available). If two mothers are coming, add the case letter, for example: 1 B.';
       }
     });
     return reply;
@@ -209,7 +227,7 @@ function createApp(opts = {}) {
 
   app.all('/twilio/voice', guard, async (req, res) => {
     const s = await store.get('live');
-    const c = s && s.cur;
+    const c = s && ((s.refs || []).find((r) => r.id === String(req.query.ref || '')) || s.cur);
     const h = c && s.facilities.find((f) => f.id === c.proposal);
     const text = h ? S.ivrText(s, h) : 'Matri-Kavach. No referral is waiting.';
     const action = notify.baseUrl() + '/twilio/voice-gather?ref=' + encodeURIComponent(String(req.query.ref || ''));
@@ -218,7 +236,8 @@ function createApp(opts = {}) {
 
   async function ivrFor(ref, answer) {
     await withSession('live', true, async (s) => {
-      if (s.cur && s.cur.id === ref && s.cur.state === 'ivr') await S.ACTIONS.ivrAnswer(s, ctx, { answer });
+      const r = (s.refs || []).find((x) => x.id === ref);
+      if (r && r.state === 'ivr') await S.ACTIONS.ivrAnswer(s, ctx, { answer, ref });
     });
   }
   app.post('/twilio/voice-gather', guard, async (req, res) => {

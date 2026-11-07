@@ -36,6 +36,15 @@ All in the `/chat` view, mostly from the ⋮ menu. Synthetic data; labels say wh
 - **Five signed emergency checklists** from one shift check-in of 17 Yes/No items, grouped as Staff, Rooms and beds, Blood and drugs, Equipment and lab. Newborn emergency is a proposed list waiting for sign-off and is never routed.
 - **SMS fallback** for a family without WhatsApp (real SMS needs a paid Twilio number). **ABDM / e-RaktKosh**: HFR IDs, the ABHA field and the e-RaktKosh stock fill are mocks, not connected.
 
+## Two mothers at the same time (added 7 Nov)
+
+- Every mother gets her own case ID and letter (Mother A, Mother B). The nurse sees one chip per open case at the top of her chat, taps a chip to switch, and taps **+ New mother** (or types NEW, or a keyword such as FITS O+) to start another referral. Open cases keep running: each has its own 2-minute timer, call and reroute.
+- Each mother gets her own 108 ambulance (Ambulance 1 and 2, phones `PHONE_DRIVER`/`PHONE_EMT` and `PHONE_DRIVER2`/`PHONE_EMT2`). If both are busy, the district is asked for the nearest free 108.
+- The driver message has the case ID, the pick-up (PHC or the ASHA's home location), the hospital and a Google Maps route link. Coordinates are demo values; in a pilot they come from ABDM HFR. Drivers still get no medical details.
+- Every hospital, doctor, blood bank and EMT message carries the case ID. A hospital asked for two mothers can answer one by letter or ID, for example `1 B` or `1 MK-123456`. A hospital that already has a mother coming is told so before it accepts a second.
+- A held blood unit leaves the hospital's free stock (and returns if the mother does not arrive), so the second mother of the same group is not sent there blindly.
+- Demo: menu ⋮ → **Two mothers at the same time**, or the **Two at once** chip.
+
 ## How routing works (plain code, no AI)
 
 `src/engine.js` is a set of pure functions. A hospital is a candidate only if every checklist item for that emergency is yes in its current shift check-in. No check-in this shift means *uncertain*, never routed as ready. A hospital marked Full is skipped. Candidates are sorted by travel time, `round(km / 30 * 60 * 1.4)` minutes. The first is proposed, SEND tells 108 at once and starts a 120 second timer for the hospital (with ask-2-at-once, the next ready hospital is asked as backup at the same moment), no reply means an automated call, no answer or "not available" means the next candidate and a fresh timer. If no candidate is left, district emergency escalation starts and the medical college is proposed as the tertiary fallback, which must still confirm. The same inputs always give the same route (tested).

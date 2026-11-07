@@ -163,7 +163,7 @@ test('ASHA home emergency: distances from the home, ambulance sent at once, driv
   try {
     const r = await h.act('ashaHome', { typeId: 'bleeding', village: 'kesla', blood: 'B+' });
     assert.strictEqual(r.cur.state, 'sent'); assert.strictEqual(r.cur.origin.name, 'Village Kesla');
-    assert.ok(msgs(r, 'driver').some((m) => /pick up at Village Kesla/.test(m)));
+    assert.ok(msgs(r, 'driver').some((m) => /pick up at Village Kesla/i.test(m) && /origin=23\.24,85\.423/.test(m)));
     assert.ok(msgs(r, 'asha').some((m) => /108 is coming to Village Kesla/.test(m)));
     const dh = r.facilities.find((f) => f.id === 'dh');
     assert.strictEqual(dh.km, Math.round(Math.hypot(40 - 33, 57 - 40)));
