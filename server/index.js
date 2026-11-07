@@ -177,6 +177,14 @@ function createApp(opts = {}) {
         const lg = body.match(/^(?:lang\s*(en|hi)|(english|hindi|हिंदी|हिन्दी)(?:\s*\(hindi\))?)$/i);
         if (lg) { s.settings.lang = /^(en|english)$/i.test(lg[1] || lg[2]) ? 'en' : 'hi'; body = 'Hi'; }
         else if (S.GREETING.test(body) && (!c || s.step === 'done')) { info.role = 'nurse'; reply = M.T.langAsk; return; }
+        const pickN = !c && s.step === 'start' && notify.baseUrl() && body.match(/^([1-9])$/);
+        const pickT = pickN && D.emergencyTypes[Number(pickN[1]) - 1];
+        if (pickT && pickT.signed) {
+          info.role = 'nurse';
+          await S.ACTIONS.startReferral(s, ctx, { typeId: pickT.id });
+          if (s.cur && s.step === 'details') { reply = S.waFormFirst(s, ctx, notify.baseUrl()); return; }
+        }
+        if (c && s.step === 'details' && /^skip$/i.test(body)) { info.role = 'nurse'; reply = await S.waSkipDetails(s, ctx); return; }
         if (/^(add\s*)?details?$/i.test(body) && c) { info.role = 'nurse'; reply = notify.baseUrl() ? S.waFormLink(s, ctx, notify.baseUrl()) : S.waFormStart(s); return; }
         if (/^form$/i.test(body) && c) { info.role = 'nurse'; reply = S.waFormStart(s); return; }
         if (S.waFormOpen(s) && (S.GREETING.test(body) || /^(help|menu)$/i.test(body))) s.waForm = null;

@@ -682,6 +682,7 @@ const isDetailsText = (text) => Boolean(parseDetails(text));
 async function waDetails(s, ctx, a) {
   const c = s.cur; const d = parseDetails(a.text);
   if (!c || !d) return s;
+  if (s.step === 'details') { say(s, 'nurse', a.text); return details(s, ctx, { patient: { name: d.name || 'Name to follow', age: d.age, blood: d.blood, informed: d.informed } }); }
   const p = Object.assign({}, c.patient || {});
   if (d.name) p.name = clean(d.name); if (d.age) p.age = clean(d.age, 4);
   const newGroup = d.blood && clean(d.blood, 6) !== p.blood;
@@ -774,6 +775,12 @@ async function waFormSave(s, ctx) {
   addEvent(s, ctx, 'Details form sent on WhatsApp: ' + who + (facts ? '. ' + facts : ''));
   const hid = s.step === 'proposed' ? null : s.cur.confirmed || s.cur.destination || (['sent', 'ivr', 'confirmed', 'fallback'].includes(s.cur.state) ? s.cur.proposal : null);
   let out = '✅ Details saved:\n' + lines.join('\n');
+  if (s.step === 'details') { // form filled before the hospital is chosen (same order as the web demo)
+    const n = s.chat.length;
+    await details(s, ctx, { patient: p });
+    const bot = s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text);
+    return out + '\n\n' + bot.join('\n');
+  }
   if (hid) {
     const h = fac(s, hid);
     if (h) await tellC(s, ctx, h.id, h.short, M.fill('waDetailsHosp', { who: who + (facts ? '. ' + facts : ''), informed: p.informed || 'Not recorded' }));
@@ -795,6 +802,17 @@ function waFormLink(s, ctx, base) {
   const token = s.id + '.f' + crypto.randomBytes(8).toString('hex');
   s.formLinks[token] = { ref: s.cur.id, expires: ctx.now() + LINK_TTL_MS };
   return `Open the patient form: ${base}/f/${token}\nFill it on one page and tap Send. The details come back to this chat. (${typeOf(s).short}${s.cur.tag && s.refs.length > 1 ? ', Mother ' + s.cur.tag : ''})`;
+}
+/* WhatsApp: after the emergency is picked, the patient form comes first (like the web demo); SKIP sends without details. */
+function waFormFirst(s, ctx, base) {
+  const t = typeOf(s);
+  const link = waFormLink(s, ctx, base).split('\n')[0];
+  return link + `\nEmergency chosen: ${t.label}.${t.review ? ' Checklist: ' + t.review + '.' : ''}${t.safety ? '\n⚠️ ' + t.safety : ''}\nFill the patient details on one page and tap Send. Then you choose SEND for the hospital.\nIn a hurry? Type SKIP to find the hospital now and send details later.`;
+}
+async function waSkipDetails(s, ctx) {
+  const n = s.chat.length;
+  await details(s, ctx, { patient: { name: 'Name to follow', informed: 'Not recorded' } });
+  return s.chat.slice(n).filter((m) => m.from === 'bot').map((m) => m.text).join('\n');
 }
 async function formView(s, ctx, token) {
   const l = s.formLinks && s.formLinks[token];
@@ -1178,5 +1196,5 @@ function roleView(view, role) {
     drill: view.drill });
 }
 
-module.exports = { GREETING, waFormLink, formView, formSubmit, waFormStart, waFormAnswer, waFormOpen, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
+module.exports = { GREETING, waFormFirst, waSkipDetails, waFormLink, formView, formSubmit, waFormStart, waFormAnswer, waFormOpen, emtCase, CFG, FEEDBACK, blank, tick, ACTIONS, publicView, clock, eta, ivrText, ALL_ITEMS, closeDigit, closePrompt,
   loginStart, loginVerify, roleOf, allowed, roleView, caseFor, refInText, refById, isDetailsText, waCheckin, waCheckinList, waStatus };
