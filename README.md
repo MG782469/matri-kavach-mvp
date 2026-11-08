@@ -203,5 +203,5 @@ sim/      20,000-case simulation (Python) and real-engine simulation (JS)
 - **Moulvi Gufran**, Clinical partner (final-year MBBS, Government Medical College, Vizianagaram). Wrote and signed the readiness checklists and reviewed every staff message.
 
 ---
-
+Maintained by Manas Girdhar (MG782469)
 *Prototype for Health-a-thon 2026. All names, hospitals, phone numbers and cases are synthetic. Not a medical device. It does not diagnose or replace clinical judgement.*
